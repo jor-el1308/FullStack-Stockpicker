@@ -1,27 +1,20 @@
 /**
  * Owner: Person 2 (Charles) - Data Collection & Database Design.
  *
- * This is where the external stock data API integration lives
- * (Alpha Vantage / FMP / Yahoo Finance - see STOCK_DATA_PROVIDER in
- * server/.env.example). Responsibilities:
+ * NOTE: for the prototype, actual data ingestion happens OUTSIDE the Node
+ * API - see /ingestion (a standalone Python script using yfinance) which
+ * writes directly into the MySQL tables this API reads from. Run it with:
  *
- *  1. fetchAndUpsertDailyPrices(exchangeCode, stockCode) - pull OHLC and
- *     upsert into `daily_price`.
- *  2. fetchAndUpsertMarketCap(exchangeCode, stockCode) - pull latest market
- *     cap into `market_cap`.
- *  3. fetchAndUpsertFinancials(exchangeCode, stockCode) - pull
- *     revenue/PBT/PAT/EBITA per year into `financials`.
- *  4. fetchAndUpsertDividends(exchangeCode, stockCode) - pull dividend per
- *     year (in cents) into `dividend`.
+ *   cd ingestion && python ingest.py
  *
- * Notes for the 7 May feedback writeup (per the requirement doc, this
- * workstream also owns documenting data-collection logistics):
- *  - Confirm which provider covers both SGX and the target US exchanges
- *    without hitting rate limits for the full stock universe.
- *  - Decide how to handle dual-listed stocks (same company, two exchange
- *    codes) so they don't get double-counted in screener results.
- *  - Free-tier API rate limits will likely require a scheduled batch job
- *    (e.g. nightly cron) rather than fetching live on each request.
+ * See ingestion/README.md for setup and known limitations (EBITDA-as-EBITA
+ * proxy, missing listed_date, dividend currency, Yahoo Finance being an
+ * unofficial API).
+ *
+ * The functions below are kept as placeholders in case this workstream
+ * later wants an on-demand refresh endpoint (e.g. POST /api/stocks/:code/refresh
+ * that triggers a re-fetch for a single stock from the Node side instead of
+ * waiting for the next batch run). Not needed for the prototype.
  */
 
 /**
@@ -29,7 +22,7 @@
  * @param {string} _stockCode
  */
 export async function fetchAndUpsertDailyPrices(_exchangeCode, _stockCode) {
-  throw new Error("Not implemented: connect to STOCK_DATA_PROVIDER and upsert into daily_price");
+  throw new Error("Not implemented on the Node side - see ingestion/ingest.py");
 }
 
 /**
@@ -37,7 +30,7 @@ export async function fetchAndUpsertDailyPrices(_exchangeCode, _stockCode) {
  * @param {string} _stockCode
  */
 export async function fetchAndUpsertMarketCap(_exchangeCode, _stockCode) {
-  throw new Error("Not implemented: connect to STOCK_DATA_PROVIDER and upsert into market_cap");
+  throw new Error("Not implemented on the Node side - see ingestion/ingest.py");
 }
 
 /**
@@ -45,7 +38,7 @@ export async function fetchAndUpsertMarketCap(_exchangeCode, _stockCode) {
  * @param {string} _stockCode
  */
 export async function fetchAndUpsertFinancials(_exchangeCode, _stockCode) {
-  throw new Error("Not implemented: connect to STOCK_DATA_PROVIDER and upsert into financials");
+  throw new Error("Not implemented on the Node side - see ingestion/ingest.py");
 }
 
 /**
@@ -53,5 +46,5 @@ export async function fetchAndUpsertFinancials(_exchangeCode, _stockCode) {
  * @param {string} _stockCode
  */
 export async function fetchAndUpsertDividends(_exchangeCode, _stockCode) {
-  throw new Error("Not implemented: connect to STOCK_DATA_PROVIDER and upsert into dividend");
+  throw new Error("Not implemented on the Node side - see ingestion/ingest.py");
 }
