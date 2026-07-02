@@ -1,0 +1,36 @@
+:root {
+  --color-dark-menu: #0a1628;
+  --color-light-bg: #f4f7fc;
+  --color-clickable: #1a5c9e;
+  --color-good: #00a86b;
+  --color-bad: #d16b6b;
+  --color-special: #c9a84c;
+
+  --font-title: "Inter", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-numeric: "Roboto Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-light-bg);
+  font-family: var(--font-body);
+  color: #1a1a1a;
+}
+
+h1, h2, h3, h4, label {
+  font-family: var(--font-title);
+  font-weight: 600;
+}
+
+.numeric {
+  font-family: var(--font-numeric);
+}
+
+a, button {
+  color: var(--color-clickable);
+}

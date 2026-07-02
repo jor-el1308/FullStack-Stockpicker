@@ -1,0 +1,36 @@
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import "dotenv/config";
+
+import authRoutes from "./routes/auth.routes.js";
+import stocksRoutes from "./routes/stocks.routes.js";
+import screenerRoutes from "./routes/screener.routes.js";
+import dashboardRoutes from "./routes/dashboard.routes.js";
+import notificationsRoutes from "./routes/notifications.routes.js";
+
+export function createApp() {
+  const app = express();
+
+  app.use(helmet());
+  app.use(cors({ origin: process.env.CLIENT_ORIGIN ?? "http://localhost:5173" }));
+  app.use(express.json());
+
+  app.get("/api/health", (_req, res) => {
+    res.json({ success: true, data: { status: "ok" } });
+  });
+
+  // Each route module is owned by one workstream (see README "Team ownership").
+  app.use("/api/auth", authRoutes); // Person 1
+  app.use("/api/stocks", stocksRoutes); // Person 2
+  app.use("/api/screener", screenerRoutes); // Person 3
+  app.use("/api/dashboard", dashboardRoutes); // Person 4
+  app.use("/api/notifications", notificationsRoutes); // Person 5
+
+  // Fallback 404
+  app.use((_req, res) => {
+    res.status(404).json({ success: false, error: { message: "Not found" } });
+  });
+
+  return app;
+}
