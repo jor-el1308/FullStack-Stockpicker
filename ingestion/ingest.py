@@ -11,9 +11,7 @@ The stock list comes from one of two places:
     (see universe.py) when USE_DYNAMIC_UNIVERSE=true in ingestion/.env -
     e.g. "every US stock on NASDAQ/NYSE above a market cap floor" instead
     of a hand-picked list. See universe.py's docstring for how that works
-    and its caveats (not live-verified in this sandbox - Yahoo Finance is
-    network-blocked here, so test this path yourself and watch the console
-    output for the "[universe] example raw entry" debug line on first run).
+    and its caveats.
 
 Usage:
     cd ingestion
@@ -24,9 +22,11 @@ Usage:
 
 This is intentionally a single flat script rather than a scheduled service -
 good enough for a 2-week prototype. Each ticker is fetched and committed
-independently so one bad/missing ticker doesn't roll back the rest of the
-batch. Known limitations (worth calling out in the 7 May-style feedback
-writeup):
+independently (5 small commits per ticker rather than 1 big one) so one
+bad/missing data category doesn't throw away everything else already
+fetched for that stock - deliberate given how often the free API is
+missing individual fields. Known limitations (worth calling out in the
+7 May-style feedback writeup):
 
   - Yahoo Finance is an unofficial/free API with no SLA - fine for a
     prototype, not something to rely on in production.
@@ -40,9 +40,18 @@ writeup):
     and converted to cents by multiplying by 100 - for SGX stocks that's
     Singapore cents, for US stocks that's US cents. Not a true apples-to-
     apples comparison across currencies; flagged as an open question too.
+
+PERFORMANCE NOTE: daily price fetching is incremental - see
+get_latest_price_date() below. On the first run for a stock we pull the
+full PRICE_HISTORY_PERIOD backfill; on every re-run after that we only
+fetch days newer than what's already stored, instead of re-pulling and
+re-upserting the full window every time. This matters for running this
+daily without wasting API calls against Yahoo's rate limits or redoing
+DB writes for data that hasn't changed.
 """
 import sys
 import time
+from datetime import timedelta
 
 import pandas as pd
 import yfinance as yf
@@ -88,9 +97,34 @@ def upsert_stock(conn, t, info):
     conn.commit()
 
 
+def get_latest_price_date(conn, t):
+    """Returns the most recent price_date already stored for this stock (a
+    datetime.date), or None if we've never fetched prices for it. Used to
+    make daily_price fetching incremental instead of re-pulling the full
+    lookback window on every run."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT MAX(price_date) FROM daily_price WHERE exchange_code = %s AND stock_code = %s",
+            (t["exchange_code"], t["stock_code"]),
+        )
+        (latest,) = cur.fetchone()
+    return latest
+
+
+def fetch_price_history(t, yf_ticker, latest_date):
+    """Full backfill on first run, incremental fetch (only new days) after that."""
+    if latest_date is None:
+        print(f"  [prices] no existing data - full backfill ({config.PRICE_HISTORY_PERIOD})")
+        return yf_ticker.history(period=config.PRICE_HISTORY_PERIOD)
+
+    start = latest_date + timedelta(days=1)
+    print(f"  [prices] incremental fetch from {start} (already have through {latest_date})")
+    return yf_ticker.history(start=start.strftime("%Y-%m-%d"))
+
+
 def upsert_daily_prices(conn, t, history: pd.DataFrame):
     if history.empty:
-        print(f"  [prices] no history returned for {t['yf_symbol']}")
+        print(f"  [prices] no new rows for {t['yf_symbol']}")
         return
     rows = []
     for ts, row in history.iterrows():
@@ -250,7 +284,8 @@ def ingest_one(conn, t):
         return  # nothing else can go in without the stock row existing (FK constraints)
 
     try:
-        history = yf_ticker.history(period=config.PRICE_HISTORY_PERIOD)
+        latest_date = get_latest_price_date(conn, t)
+        history = fetch_price_history(t, yf_ticker, latest_date)
         upsert_daily_prices(conn, t, history)
     except Exception as err:
         print(f"  [prices] failed: {err}")
@@ -299,15 +334,22 @@ def get_ticker_list():
 
 def main():
     conn = db.get_connection()
+    succeeded = 0
+    failed = 0
     try:
         tickers, exchanges = get_ticker_list()
         upsert_exchanges(conn, exchanges)
         for t in tickers:
-            ingest_one(conn, t)
+            try:
+                ingest_one(conn, t)
+                succeeded += 1
+            except Exception as err:
+                failed += 1
+                print(f"  [ticker] unexpected failure for {t['yf_symbol']}: {err}")
             time.sleep(0.5)  # be polite to Yahoo's unofficial endpoints
     finally:
         conn.close()
-    print("\nDone.")
+    print(f"\nDone. {succeeded} stocks processed, {failed} failed outright.")
 
 
 if __name__ == "__main__":
