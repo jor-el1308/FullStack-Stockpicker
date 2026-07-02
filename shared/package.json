@@ -1,0 +1,8 @@
+{
+  "name": "@stockpicker/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared JSDoc type definitions used by both client and server",
+  "main": "types/index.js",
+  "type": "module"
+}
