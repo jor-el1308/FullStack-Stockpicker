@@ -2,9 +2,18 @@
 Owner: Person 2 (Charles) - Data Collection & Database Design.
 
 Prototype data-ingestion pipeline: pulls OHLC, market cap, dividends, and
-yearly financials from Yahoo Finance (via the `yfinance` package) for the
-fixed stock list in tickers.py, and upserts everything into the MySQL
-schema defined in server/src/db/schema.sql.
+yearly financials from Yahoo Finance (via the `yfinance` package) and
+upserts everything into the MySQL schema defined in server/src/db/schema.sql.
+
+The stock list comes from one of two places:
+  - tickers.py's fixed 15-stock list (default), or
+  - a dynamic, criteria-based universe via yfinance EquityQuery/screen()
+    (see universe.py) when USE_DYNAMIC_UNIVERSE=true in ingestion/.env -
+    e.g. "every US stock on NASDAQ/NYSE above a market cap floor" instead
+    of a hand-picked list. See universe.py's docstring for how that works
+    and its caveats (not live-verified in this sandbox - Yahoo Finance is
+    network-blocked here, so test this path yourself and watch the console
+    output for the "[universe] example raw entry" debug line on first run).
 
 Usage:
     cd ingestion
@@ -40,12 +49,13 @@ import yfinance as yf
 
 import config
 import db
+import universe
 from tickers import EXCHANGES, TICKERS
 
 
-def upsert_exchanges(conn):
+def upsert_exchanges(conn, exchanges=None):
     with conn.cursor() as cur:
-        for ex in EXCHANGES:
+        for ex in (exchanges if exchanges is not None else EXCHANGES):
             cur.execute(
                 """
                 INSERT INTO exchange (exchange_code, exchange_name, country, currency)
@@ -265,11 +275,34 @@ def ingest_one(conn, t):
         conn.rollback()
 
 
+def get_ticker_list():
+    """Returns (ticker_entries, exchange_rows). Falls back to the static
+    tickers.py list if dynamic discovery is off or comes back empty."""
+    if not config.USE_DYNAMIC_UNIVERSE:
+        return TICKERS, EXCHANGES
+
+    print("USE_DYNAMIC_UNIVERSE=true - discovering stock list via yfinance EquityQuery/screen() ...")
+    try:
+        discovered = universe.discover_universe()
+    except Exception as err:
+        print(f"  [universe] discovery failed ({err}); falling back to static tickers.py list")
+        return TICKERS, EXCHANGES
+
+    if not discovered:
+        print("  [universe] discovery returned 0 stocks; falling back to static tickers.py list")
+        return TICKERS, EXCHANGES
+
+    print(f"  [universe] discovered {len(discovered)} stocks total")
+    print(f"  [universe] example raw entry: {discovered[0]}")
+    return discovered, universe.discover_exchanges(discovered)
+
+
 def main():
     conn = db.get_connection()
     try:
-        upsert_exchanges(conn)
-        for t in TICKERS:
+        tickers, exchanges = get_ticker_list()
+        upsert_exchanges(conn, exchanges)
+        for t in tickers:
             ingest_one(conn, t)
             time.sleep(0.5)  # be polite to Yahoo's unofficial endpoints
     finally:
