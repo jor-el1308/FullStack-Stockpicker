@@ -34,3 +34,9 @@ coverage/
 
 # MySQL local data dumps
 *.sql.bak
+
+# Python (ingestion/)
+ingestion/venv/
+ingestion/__pycache__/
+**/__pycache__/
+*.pyc
