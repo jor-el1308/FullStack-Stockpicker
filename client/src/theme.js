@@ -9,6 +9,8 @@ export const colors = {
   goodNumber: "#00A86B", // Positive/good numbers (e.g. price up, good financials)
   badNumber: "#D16B6B", // Negative/bad numbers
   special: "#C9A84C", // Special features / highlights
+  border: "rgba(10, 22, 40, 0.12)", // Neutral border, derived from darkMenu
+  mutedText: "rgba(10, 22, 40, 0.65)", // Secondary text, derived from darkMenu
 };
 
 export const fonts = {

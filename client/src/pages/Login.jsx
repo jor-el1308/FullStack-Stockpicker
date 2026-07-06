@@ -8,7 +8,6 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import { colors } from "../theme";
 
 const CRITERIA_OPTIONS = [
   { key: "marketCap", label: "Market Cap" },
@@ -58,61 +57,68 @@ function AuthForm({ onAuthenticated }) {
   }
 
   return (
-    <section style={{ maxWidth: 380 }}>
-      <h1>{mode === "login" ? "Log In" : "Create Account"}</h1>
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {mode === "signup" && (
-          <label>
-            Name
+    <div className="auth-page">
+      <section className="auth-card">
+        <h1 className="auth-title">{mode === "login" ? "Welcome back" : "Create your account"}</h1>
+        <p className="auth-subtitle">
+          {mode === "login"
+            ? "Log in to access your saved screeners and watchlist."
+            : "Sign up to start building your investment screeners."}
+        </p>
+        <form onSubmit={handleSubmit} className="auth-form">
+          {mode === "signup" && (
+            <label className="auth-label">
+              Name
+              <input
+                type="text"
+                required
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                className="auth-input"
+              />
+            </label>
+          )}
+          <label className="auth-label">
+            Email
             <input
-              type="text"
+              type="email"
               required
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              style={inputStyle}
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              className="auth-input"
             />
           </label>
-        )}
-        <label>
-          Email
-          <input
-            type="email"
-            required
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            style={inputStyle}
-          />
-        </label>
-        <label>
-          Password
-          <input
-            type="password"
-            required
-            minLength={8}
-            value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            style={inputStyle}
-          />
-        </label>
-        {error && <p style={{ color: colors.badNumber }}>{error}</p>}
-        <button type="submit" disabled={submitting} style={buttonStyle}>
-          {submitting ? "Please wait..." : mode === "login" ? "Log In" : "Sign Up"}
-        </button>
-      </form>
-      <p>
-        {mode === "login" ? "Need an account? " : "Already have an account? "}
-        <button
-          type="button"
-          onClick={() => {
-            setMode(mode === "login" ? "signup" : "login");
-            setError("");
-          }}
-          style={linkButtonStyle}
-        >
-          {mode === "login" ? "Sign up" : "Log in"}
-        </button>
-      </p>
-    </section>
+          <label className="auth-label">
+            Password
+            <input
+              type="password"
+              required
+              minLength={8}
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              className="auth-input"
+            />
+          </label>
+          {error && <p className="auth-error">{error}</p>}
+          <button type="submit" disabled={submitting} className="auth-button">
+            {submitting ? "Please wait..." : mode === "login" ? "Log In" : "Sign Up"}
+          </button>
+        </form>
+        <p className="auth-footer">
+          {mode === "login" ? "Need an account? " : "Already have an account? "}
+          <button
+            type="button"
+            onClick={() => {
+              setMode(mode === "login" ? "signup" : "login");
+              setError("");
+            }}
+            className="auth-link-button"
+          >
+            {mode === "login" ? "Sign up" : "Log in"}
+          </button>
+        </p>
+      </section>
+    </div>
   );
 }
 
@@ -176,111 +182,97 @@ function AccountPanel({ user, onLogout }) {
   }
 
   return (
-    <section style={{ maxWidth: 560 }}>
-      <h1>My Account</h1>
-      <p>
-        Logged in as <strong>{user.name}</strong> ({user.email})
-        <button type="button" onClick={onLogout} style={{ ...buttonStyle, marginLeft: 16 }}>
-          Log Out
-        </button>
-      </p>
+    <div className="auth-page">
+      <section className="auth-card account-card">
+        <h1 className="auth-title" style={{ textAlign: "left" }}>
+          My Account
+        </h1>
+        <p style={{ marginTop: 0 }}>
+          Logged in as <strong>{user.name}</strong> ({user.email})
+          <button type="button" onClick={onLogout} className="auth-link-button" style={{ marginLeft: 16 }}>
+            Log Out
+          </button>
+        </p>
 
-      <h2>Saved Screener Criteria</h2>
-      {loadError && <p style={{ color: colors.badNumber }}>{loadError}</p>}
-      {sets.length === 0 && !loadError && <p>No saved criteria sets yet.</p>}
-      <ul>
-        {sets.map((set) => (
-          <li key={set.id}>
-            <strong>{set.name}</strong>
-            <ul>
-              {set.criteria.map((range, i) => (
-                <li key={i} className="numeric">
-                  {range.key}: {range.min ?? "–"} to {range.max ?? "–"}
-                </li>
-              ))}
-            </ul>
-          </li>
-        ))}
-      </ul>
+        <h2>Saved Screener Criteria</h2>
+        {loadError && <p className="auth-error" style={{ textAlign: "left" }}>{loadError}</p>}
+        {sets.length === 0 && !loadError && <p>No saved criteria sets yet.</p>}
+        <ul>
+          {sets.map((set) => (
+            <li key={set.id}>
+              <strong>{set.name}</strong>
+              <ul>
+                {set.criteria.map((range, i) => (
+                  <li key={i} className="numeric">
+                    {range.key}: {range.min ?? "–"} to {range.max ?? "–"}
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
 
-      <h2>Save a New Criteria Set</h2>
-      <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <label>
-          Set name
-          <input
-            type="text"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            style={inputStyle}
-          />
-        </label>
-        {rows.map((row, i) => (
-          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <select value={row.key} onChange={(e) => updateRow(i, "key", e.target.value)} style={inputStyle}>
-              {CRITERIA_OPTIONS.map((opt) => (
-                <option key={opt.key} value={opt.key}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+        <h2>Save a New Criteria Set</h2>
+        <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <label className="auth-label">
+            Set name
             <input
-              type="number"
-              placeholder="Min"
-              value={row.min}
-              onChange={(e) => updateRow(i, "min", e.target.value)}
-              style={inputStyle}
+              type="text"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="auth-input"
+              style={{ width: "100%" }}
             />
-            <input
-              type="number"
-              placeholder="Max"
-              value={row.max}
-              onChange={(e) => updateRow(i, "max", e.target.value)}
-              style={inputStyle}
-            />
-            {rows.length > 1 && (
-              <button type="button" onClick={() => removeRow(i)} style={buttonStyle}>
-                Remove
-              </button>
-            )}
-          </div>
-        ))}
-        <button type="button" onClick={addRow} style={{ ...buttonStyle, alignSelf: "flex-start" }}>
-          + Add Criteria Row
-        </button>
-        {saveError && <p style={{ color: colors.badNumber }}>{saveError}</p>}
-        <button type="submit" disabled={saving} style={buttonStyle}>
-          {saving ? "Saving..." : "Save Criteria Set"}
-        </button>
-      </form>
-    </section>
+          </label>
+          {rows.map((row, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <select
+                value={row.key}
+                onChange={(e) => updateRow(i, "key", e.target.value)}
+                className="auth-input"
+              >
+                {CRITERIA_OPTIONS.map((opt) => (
+                  <option key={opt.key} value={opt.key}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                placeholder="Min"
+                value={row.min}
+                onChange={(e) => updateRow(i, "min", e.target.value)}
+                className="auth-input"
+              />
+              <input
+                type="number"
+                placeholder="Max"
+                value={row.max}
+                onChange={(e) => updateRow(i, "max", e.target.value)}
+                className="auth-input"
+              />
+              {rows.length > 1 && (
+                <button type="button" onClick={() => removeRow(i)} className="auth-link-button">
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={addRow}
+            className="auth-button"
+            style={{ width: "auto", alignSelf: "flex-start" }}
+          >
+            + Add Criteria Row
+          </button>
+          {saveError && <p className="auth-error" style={{ textAlign: "left" }}>{saveError}</p>}
+          <button type="submit" disabled={saving} className="auth-button">
+            {saving ? "Saving..." : "Save Criteria Set"}
+          </button>
+        </form>
+      </section>
+    </div>
   );
 }
-
-const inputStyle = {
-  display: "block",
-  width: "100%",
-  padding: "8px 10px",
-  marginTop: 4,
-  border: "1px solid #ccc",
-  borderRadius: 4,
-  fontFamily: "inherit",
-};
-
-const buttonStyle = {
-  padding: "8px 14px",
-  background: colors.clickable,
-  color: "#fff",
-  border: "none",
-  borderRadius: 4,
-  cursor: "pointer",
-};
-
-const linkButtonStyle = {
-  background: "none",
-  border: "none",
-  padding: 0,
-  cursor: "pointer",
-  textDecoration: "underline",
-  color: colors.clickable,
-};
