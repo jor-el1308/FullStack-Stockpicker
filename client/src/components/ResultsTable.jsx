@@ -5,9 +5,9 @@ import { colors, fonts } from "../theme";
  * Renders the results table described in the requirement doc (section 5b):
  * Exchange, Stock Code, Stock Name, then one column per criteria value.
  *
- * @param {{ rows: import("../../../shared/types/index.js").ScreenerResultRow[] }} props
+ * @param {{ rows: import("../../../shared/types/index.js").ScreenerResultRow[], onRowClick?: (row) => void }} props
  */
-export default function ResultsTable({ rows }) {
+export default function ResultsTable({ rows, onRowClick }) {
   if (rows.length === 0) {
     return <p style={{ fontFamily: fonts.description }}>No results yet. Run the screener above.</p>;
   }
@@ -28,7 +28,11 @@ export default function ResultsTable({ rows }) {
       </thead>
       <tbody>
         {rows.map((row) => (
-          <tr key={`${row.exchangeCode}-${row.stockCode}`}>
+          <tr
+            key={`${row.exchangeCode}-${row.stockCode}`}
+            onClick={() => onRowClick?.(row)}
+            style={{ cursor: onRowClick ? "pointer" : "default" }}
+          >
             <td>{row.exchangeCode}</td>
             <td className="numeric">{row.stockCode}</td>
             <td>{row.stockName}</td>
