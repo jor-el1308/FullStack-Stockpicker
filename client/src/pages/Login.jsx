@@ -1,10 +1,9 @@
 /**
  * Owner: Person 1 (Yong Wee) - Auth & User Management.
  * Login/signup form (POST /api/auth/login, /api/auth/signup) plus, once
- * logged in, an account panel for saving/viewing screener criteria sets
- * (GET/POST /api/auth/me/criteria-sets).
+ * logged in, a minimal account panel confirming the logged-in user.
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
@@ -57,130 +56,90 @@ function AuthForm({ onAuthenticated }) {
   }
 
   return (
-    <div className="auth-page">
-      <section className="auth-card">
-        <h1 className="auth-title">{mode === "login" ? "Welcome back" : "Create your account"}</h1>
-        <p className="auth-subtitle">
-          {mode === "login"
-            ? "Log in to access your saved screeners and watchlist."
-            : "Sign up to start building your investment screeners."}
-        </p>
-        <form onSubmit={handleSubmit} className="auth-form">
-          {mode === "signup" && (
-            <label className="auth-label">
-              Name
+    <div className="auth-dark-page">
+      <div className="auth-dark-hero">
+        <div className="auth-dark-hero-inner">
+          <span className="auth-dark-hero-eyebrow">Stock Screener</span>
+          <h2 className="auth-dark-hero-title">Find promising investments, faster.</h2>
+          <p className="auth-dark-hero-text">
+            Screen stocks by fundamentals, track dividends and valuations, and build
+            watchlists tailored to the criteria that matter to you.
+          </p>
+        </div>
+      </div>
+
+      <aside className="auth-dark-sidebar">
+        <div className="auth-dark-logo">
+          <span className="auth-dark-logo-mark">SS</span>
+          <span className="auth-dark-logo-text">Stock Screener</span>
+        </div>
+
+        <div>
+          <h1 className="auth-dark-title">{mode === "login" ? "Welcome back" : "Create your account"}</h1>
+          <p className="auth-dark-subtitle">
+            {mode === "login"
+              ? "Log in to access your saved screeners and watchlist."
+              : "Sign up to start building your investment screeners."}
+          </p>
+          <form onSubmit={handleSubmit} className="auth-dark-form">
+            {mode === "signup" && (
+              <label className="auth-dark-label">
+                Name
+                <input
+                  type="text"
+                  required
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  className="auth-dark-input"
+                />
+              </label>
+            )}
+            <label className="auth-dark-label">
+              Email
               <input
-                type="text"
+                type="email"
                 required
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="auth-input"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                className="auth-dark-input"
               />
             </label>
-          )}
-          <label className="auth-label">
-            Email
-            <input
-              type="email"
-              required
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="auth-input"
-            />
-          </label>
-          <label className="auth-label">
-            Password
-            <input
-              type="password"
-              required
-              minLength={8}
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="auth-input"
-            />
-          </label>
-          {error && <p className="auth-error">{error}</p>}
-          <button type="submit" disabled={submitting} className="auth-button">
-            {submitting ? "Please wait..." : mode === "login" ? "Log In" : "Sign Up"}
-          </button>
-        </form>
-        <p className="auth-footer">
-          {mode === "login" ? "Need an account? " : "Already have an account? "}
-          <button
-            type="button"
-            onClick={() => {
-              setMode(mode === "login" ? "signup" : "login");
-              setError("");
-            }}
-            className="auth-link-button"
-          >
-            {mode === "login" ? "Sign up" : "Log in"}
-          </button>
-        </p>
-      </section>
+            <label className="auth-dark-label">
+              Password
+              <input
+                type="password"
+                required
+                minLength={8}
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                className="auth-dark-input"
+              />
+            </label>
+            {error && <p className="auth-dark-error">{error}</p>}
+            <button type="submit" disabled={submitting} className="auth-dark-button">
+              {submitting ? "Please wait..." : mode === "login" ? "Log In" : "Sign Up"}
+            </button>
+          </form>
+          <p className="auth-dark-footer">
+            {mode === "login" ? "Need an account? " : "Already have an account? "}
+            <button
+              type="button"
+              onClick={() => {
+                setMode(mode === "login" ? "signup" : "login");
+                setError("");
+              }}
+              className="auth-dark-link"
+            >
+              {mode === "login" ? "Sign up" : "Log in"}
+            </button>
+          </p>
+        </div>
+      </aside>
     </div>
   );
 }
 
 function AccountPanel({ user, onLogout }) {
-  const [sets, setSets] = useState([]);
-  const [loadError, setLoadError] = useState("");
-  const [name, setName] = useState("");
-  const [rows, setRows] = useState([{ key: CRITERIA_OPTIONS[0].key, min: "", max: "" }]);
-  const [saveError, setSaveError] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    refreshSets();
-  }, []);
-
-  async function refreshSets() {
-    try {
-      const data = await api.get("/auth/me/criteria-sets");
-      setSets(data);
-    } catch (err) {
-      setLoadError(err.message);
-    }
-  }
-
-  function updateRow(index, field, value) {
-    setRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
-  }
-
-  function addRow() {
-    setRows((prev) => [...prev, { key: CRITERIA_OPTIONS[0].key, min: "", max: "" }]);
-  }
-
-  function removeRow(index) {
-    setRows((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  async function handleSave(e) {
-    e.preventDefault();
-    setSaveError("");
-    setSaving(true);
-    try {
-      const criteria = rows
-        .filter((row) => row.min !== "" || row.max !== "")
-        .map((row) => ({
-          key: row.key,
-          min: row.min === "" ? undefined : Number(row.min),
-          max: row.max === "" ? undefined : Number(row.max),
-        }));
-      if (criteria.length === 0) {
-        throw new Error("Add at least one criteria row with a min or max value");
-      }
-      await api.post("/auth/me/criteria-sets", { name, criteria });
-      setName("");
-      setRows([{ key: CRITERIA_OPTIONS[0].key, min: "", max: "" }]);
-      await refreshSets();
-    } catch (err) {
-      setSaveError(err.message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
     <div className="auth-page">
       <section className="auth-card account-card">
@@ -189,89 +148,10 @@ function AccountPanel({ user, onLogout }) {
         </h1>
         <p style={{ marginTop: 0 }}>
           Logged in as <strong>{user.name}</strong> ({user.email})
-          <button type="button" onClick={onLogout} className="auth-link-button" style={{ marginLeft: 16 }}>
-            Log Out
-          </button>
         </p>
-
-        <h2>Saved Screener Criteria</h2>
-        {loadError && <p className="auth-error" style={{ textAlign: "left" }}>{loadError}</p>}
-        {sets.length === 0 && !loadError && <p>No saved criteria sets yet.</p>}
-        <ul>
-          {sets.map((set) => (
-            <li key={set.id}>
-              <strong>{set.name}</strong>
-              <ul>
-                {set.criteria.map((range, i) => (
-                  <li key={i} className="numeric">
-                    {range.key}: {range.min ?? "–"} to {range.max ?? "–"}
-                  </li>
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ul>
-
-        <h2>Save a New Criteria Set</h2>
-        <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <label className="auth-label">
-            Set name
-            <input
-              type="text"
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="auth-input"
-              style={{ width: "100%" }}
-            />
-          </label>
-          {rows.map((row, i) => (
-            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <select
-                value={row.key}
-                onChange={(e) => updateRow(i, "key", e.target.value)}
-                className="auth-input"
-              >
-                {CRITERIA_OPTIONS.map((opt) => (
-                  <option key={opt.key} value={opt.key}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="number"
-                placeholder="Min"
-                value={row.min}
-                onChange={(e) => updateRow(i, "min", e.target.value)}
-                className="auth-input"
-              />
-              <input
-                type="number"
-                placeholder="Max"
-                value={row.max}
-                onChange={(e) => updateRow(i, "max", e.target.value)}
-                className="auth-input"
-              />
-              {rows.length > 1 && (
-                <button type="button" onClick={() => removeRow(i)} className="auth-link-button">
-                  Remove
-                </button>
-              )}
-            </div>
-          ))}
-          <button
-            type="button"
-            onClick={addRow}
-            className="auth-button"
-            style={{ width: "auto", alignSelf: "flex-start" }}
-          >
-            + Add Criteria Row
-          </button>
-          {saveError && <p className="auth-error" style={{ textAlign: "left" }}>{saveError}</p>}
-          <button type="submit" disabled={saving} className="auth-button">
-            {saving ? "Saving..." : "Save Criteria Set"}
-          </button>
-        </form>
+        <button type="button" onClick={onLogout} className="auth-button" style={{ width: "auto" }}>
+          Log Out
+        </button>
       </section>
     </div>
   );

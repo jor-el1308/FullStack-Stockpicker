@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
 import Login from "./pages/Login";
 import Screener from "./pages/Screener";
 import Dashboard from "./pages/Dashboard";
@@ -37,23 +37,33 @@ function NavBar() {
   );
 }
 
+function AppLayout() {
+  const { user } = useAuth();
+  const { pathname } = useLocation();
+  const isAuthScreen = pathname === "/login" && !user;
+
+  return (
+    <div style={{ minHeight: "100vh" }}>
+      {!isAuthScreen && <NavBar />}
+
+      <main style={isAuthScreen ? undefined : { padding: 24 }}>
+        <Routes>
+          <Route path="/" element={<Screener />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/stock/:exchangeCode/:stockCode" element={<StockDetail />} />
+          <Route path="/watchlist" element={<Watchlist />} />
+          <Route path="/login" element={<Login />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <div style={{ minHeight: "100vh" }}>
-          <NavBar />
-
-          <main style={{ padding: 24 }}>
-            <Routes>
-              <Route path="/" element={<Screener />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/stock/:exchangeCode/:stockCode" element={<StockDetail />} />
-              <Route path="/watchlist" element={<Watchlist />} />
-              <Route path="/login" element={<Login />} />
-            </Routes>
-          </main>
-        </div>
+        <AppLayout />
       </BrowserRouter>
     </AuthProvider>
   );
