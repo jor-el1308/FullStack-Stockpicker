@@ -25,33 +25,42 @@ ingestion/  Python script (yfinance) that writes stock data into MySQL
 shared/     Shared JSDoc typedefs (ScreenerRequest, StockDetail, etc.)
 ```
 
-## Team ownership (from the requirement doc)
+## Team ownership (current work split)
 
-| Person | Area | Main folders |
-|---|---|---|
-| 1 — Yong Wee | Auth & User Management | `server/src/{routes,controllers,services}/auth.*`, `client/src/pages/Login.jsx` |
-| 2 — Charles | Data Pipeline + Subscription/Paywall + Admin Dashboard | `server/src/db/schema.sql`, `ingestion/` (yfinance pipeline), `server/src/{routes,controllers,services}/{subscription,admin}.*`, `client/src/pages/{Activate,Admin}.jsx` |
-| 3 — Jorel | Screener / Filter Engine | `server/src/{routes,controllers,services}/screener.*`, `client/src/pages/Screener.jsx` |
-| 4 — Enrico | Dashboard & Stock Report Page | `server/src/{routes,controllers}/dashboard.*`, `client/src/pages/{Dashboard,StockDetail}.jsx`, `client/src/components/ResultsTable.jsx` |
-| 5 — Jayden | Notifications & Optional AI Step | `server/src/{routes,controllers,services}/notifications.*`, `client/src/pages/Watchlist.jsx` |
+| Person | Area | Individual feature | Main folders |
+|---|---|---|---|
+| 1 — Yong Wee | Auth + AI Recommendation | After a user runs a screen, send the shortlisted stocks to an AI model for qualitative analysis (recent news, growth outlook, reasoning) | `server/src/{routes,controllers,services}/auth.*`, `client/src/pages/Login.jsx` |
+| 2 — Charles | Data Pipeline + Subscription/Paywall + Admin Dashboard | Subscription/payment page - new users pay to activate their account before accessing anything else | `server/src/db/schema.sql`, `ingestion/` (yfinance pipeline), `server/src/{routes,controllers,services}/{subscription,admin}.*`, `client/src/pages/{Activate,Admin}.jsx` |
+| 3 — Jorel | Stock Screener / Filter Engine | Range-based filtering across criteria (market cap, revenue, dividend yield, PAT, EBITA, etc.), default filter values, company-age exclusion, sector exclusions | `server/src/{routes,controllers,services}/screener.*`, `client/src/pages/Screener.jsx` |
+| 4 — Enrico | Dashboard + Stock Report Page | Screener results table and per-stock detail page - closing price chart, 52-week high/low, key criteria values | `server/src/{routes,controllers}/dashboard.*`, `client/src/pages/{Dashboard,StockDetail}.jsx`, `client/src/components/ResultsTable.jsx` |
+| 5 — Jayden | Notifications / Watchlist | Watchlist page (pass/fail status against saved criteria) plus Telegram/WhatsApp alerts when a stock drops out of criteria | `server/src/{routes,controllers,services}/notifications.*`, `client/src/pages/Watchlist.jsx` |
 
-Person 2's work is foundational — the schema and stock lookup endpoints are
-filled in with working queries (not just stubs) so everyone else can build
-against real data early. Every other route/controller file currently returns
-`501 Not Implemented` as a placeholder — replace with real logic in your
-workstream's files.
+Auth (Person 1) and the data pipeline/schema (Person 2) are foundational -
+everyone else's features depend on a logged-in user and real data existing,
+so those two started first. Person 3's screener is the algorithmically
+densest piece and the one Persons 4 and 5 build on top of, so a stubbed API
+endpoint went out early for them to build against before the real filtering
+logic landed.
 
 **Paywall note:** every route except `/api/auth/*`, `/api/subscription/*`,
-and `/api/admin/*` now requires the logged-in user to have an active (paid)
+and `/api/admin/*` requires the logged-in user to have an active (paid)
 account - see `server/src/middleware/subscription.middleware.js`. New
 signups start inactive and get redirected to `/activate` until they pay
-the one-time activation fee.
+the one-time activation fee. Needs to stay in sync with Person 1's
+signup -> login flow since that's what determines when a user first hits
+the paywall.
 
-**Admin note:** `users.is_admin` gates the `/admin` page and `/api/admin/*`
-routes (view all users, revoke/restore access) - see
+**Admin note (done):** `users.is_admin` gates the `/admin` page and
+`/api/admin/*` routes (view all users, revoke/restore access, promote/demote
+admins, per-user payment history, summary stats) - see
 `server/src/middleware/admin.middleware.js`. Nobody can self-promote to
 admin; see `server/src/db/migrations/002_add_admin_flag.sql` for how to
 bootstrap the first admin account.
+
+**Ideas / not yet built:**
+- Light/dark mode toggle (a settings dropdown - theme switch, logout, etc.)
+- Left-side nav bar instead of the current top nav
+- Login through identity providers (optional / stretch)
 
 ## Run with Docker (fastest way to get it running)
 
@@ -186,17 +195,8 @@ hardcoding values:
 - Special features: `#C9A84C`
 - Titles/labels: Inter Semi-bold · Body/filters: Inter Regular · All numbers: Roboto Mono
 
-## Note on JavaScript vs TypeScript
 
-This scaffold is plain JavaScript (no build-time type checking). The
-`shared/types/index.js` file documents the API contract via JSDoc
-`@typedef` comments — editors like VS Code will still show autocomplete
-hints from these even without TypeScript. If the team wants compile-time
-type safety back later, re-introducing TypeScript is mostly a matter of
-renaming files back to `.ts`/`.tsx` and adding `tsconfig.json` files, since
-the code was written without relying on any JS-only syntax.
-
-## Known open questions (for the 7 May feedback per the requirement doc)
+## Known open questions
 
 - Data provider: using Yahoo Finance (`yfinance`) for the prototype since
   it's free and covers both SGX and US tickers — see `ingestion/README.md`
