@@ -74,7 +74,7 @@ function AuthForm({ onAuthenticated }) {
           <span className="auth-dark-logo-text">Stock Screener</span>
         </div>
 
-        <div>
+        <div className="auth-dark-content">
           <h1 className="auth-dark-title">{mode === "login" ? "Welcome back" : "Create your account"}</h1>
           <p className="auth-dark-subtitle">
             {mode === "login"
