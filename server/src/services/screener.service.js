@@ -106,8 +106,17 @@ export function buildScreenerQuery(request = {}) {
 
   // ---- default exclusions ----
   // Company-age exclusion (< N years; defaults to 5).
+  // NOTE (Person 2, data pipeline owner): s.listed_date is NULL for every
+  // stock ingested via ingestion/ingest.py - yfinance doesn't reliably
+  // expose IPO/listing date (see ingest.py's docstring), so this used to
+  // silently exclude 100% of ingested stocks (NULL >= N is NULL, which is
+  // falsy in SQL's WHERE). Treat an unknown listed_date as "don't apply
+  // this default exclusion" instead of "fails it" - same pattern already
+  // used for the sector exclusion below. Doesn't touch the companyAgeYears
+  // range filter above (COLUMN_EXPR), which stays strict when a user
+  // explicitly filters on it.
   const minAge = request.minCompanyAgeYears != null ? Number(request.minCompanyAgeYears) : 5;
-  where.push(`TIMESTAMPDIFF(YEAR, s.listed_date, CURDATE()) >= ?`);
+  where.push(`(s.listed_date IS NULL OR TIMESTAMPDIFF(YEAR, s.listed_date, CURDATE()) >= ?)`);
   params.push(minAge);
 
   // Sector exclusions (gambling/tobacco by default).

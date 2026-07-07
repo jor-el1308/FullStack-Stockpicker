@@ -51,8 +51,9 @@ export async function getStatus(userId) {
 
 /**
  * Shared DB write: records a payment row and flips the user active.
- * Used by both the Stripe flow and (if Stripe isn't configured) the mock
- * fallback below, so there's exactly one place that touches these tables.
+ * The only caller is the real Stripe flow below, but this stays a
+ * separate function so there's exactly one place that touches these
+ * tables if another payment path is ever added.
  *
  * @param {string} userId
  * @param {{ amountCents: number, currency: string, paymentMethod: string }} details
@@ -143,22 +144,6 @@ export async function verifyAndActivateFromSession(sessionId, expectedUserId) {
   });
 
   return { ...status, paymentStatus: session.payment_status };
-}
-
-/**
- * Mock fallback - only used if STRIPE_SECRET_KEY isn't configured, so the
- * rest of the app (and teammates without Stripe keys set up yet) can still
- * exercise the activation flow without needing a Stripe account. Not
- * wired to any route by default - see subscription.routes.js.
- *
- * @param {string} userId
- */
-export async function payActivationFeeMock(userId) {
-  return recordPaymentAndActivate(userId, {
-    amountCents: ACTIVATION_FEE_CENTS,
-    currency: ACTIVATION_CURRENCY.toUpperCase(),
-    paymentMethod: "mock",
-  });
 }
 
 /**
