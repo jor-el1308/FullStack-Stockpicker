@@ -80,3 +80,8 @@ export async function getUserPayments(req, res) {
     res.status(500).json({ success: false, error: { message: err.message } });
   }
 }
+
+export function clearCache(_req, res) {
+  const result = adminService.clearCache();
+  res.json({ success: true, data: result });
+}

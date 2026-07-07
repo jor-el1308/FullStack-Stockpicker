@@ -25,3 +25,7 @@ export function setAdmin(userId, isAdmin) {
 export function getUserPayments(userId) {
   return api.get(`/admin/users/${userId}/payments`);
 }
+
+export function clearCache() {
+  return api.post("/admin/cache/clear");
+}
