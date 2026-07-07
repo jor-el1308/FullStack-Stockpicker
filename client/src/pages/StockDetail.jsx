@@ -5,7 +5,7 @@
  * graph and 52-week high/low (StockDetail typedef in shared/types/index.js).
  */
 import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, TrendingUp, TrendingDown } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -44,10 +44,25 @@ const statValue = { fontFamily: fonts.numeric, fontWeight: fontWeights.numeric, 
 export default function StockDetail() {
   const { exchangeCode, stockCode } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [detail, setDetail] = useState(null);
   const [prices, setPrices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Screener ("/") and Dashboard ("/dashboard") both link here, so "back"
+  // shouldn't be hard-coded to one of them - go back exactly one step in
+  // history (wherever that actually was). location.key === "default" means
+  // this page was the first thing loaded in the tab (e.g. a bookmarked/
+  // shared /stock/... URL), where there's nothing to go back to, so fall
+  // back to the dashboard in that case only.
+  function handleBack() {
+    if (location.key !== "default") {
+      navigate(-1);
+    } else {
+      navigate("/dashboard");
+    }
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -74,7 +89,7 @@ export default function StockDetail() {
           Couldn't load {exchangeCode}:{stockCode}. {error}
         </div>
         <button
-          onClick={() => navigate("/dashboard")}
+          onClick={handleBack}
           style={{ color: colors.clickable, background: "none", border: "none", cursor: "pointer", fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel }}
         >
           Back to results
@@ -105,7 +120,7 @@ export default function StockDetail() {
   return (
     <div style={{ padding: 28 }}>
       <button
-        onClick={() => navigate("/dashboard")}
+        onClick={handleBack}
         style={{
           display: "flex",
           alignItems: "center",
