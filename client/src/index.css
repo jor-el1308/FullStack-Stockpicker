@@ -268,12 +268,23 @@ a, button {
   color: #ffffff;
 }
 
+.auth-dark-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: min(100%, 360px);
+  margin: 0 auto;
+  align-self: center;
+}
+
 .auth-dark-title {
   margin: 0 0 6px;
   font-family: var(--font-title);
   font-weight: 600;
   font-size: 26px;
   color: #ffffff;
+  text-align: center;
 }
 
 .auth-dark-subtitle {
@@ -281,16 +292,19 @@ a, button {
   font-family: var(--font-body);
   font-size: 14px;
   color: var(--color-muted-text-dark);
+  text-align: center;
 }
 
 .auth-dark-form {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  width: 100%;
 }
 
 .auth-dark-label {
   display: block;
+  width: 100%;
   font-family: var(--font-title);
   font-weight: 600;
   font-size: 13px;
@@ -356,6 +370,7 @@ a, button {
   font-family: var(--font-body);
   font-size: 14px;
   color: var(--color-muted-text-dark);
+  text-align: center;
 }
 
 .auth-dark-link {
