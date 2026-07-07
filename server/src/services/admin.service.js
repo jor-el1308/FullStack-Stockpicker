@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { cacheClear, cacheSize } from "../utils/cache.js";
 
 /**
  * Owner: Person 2 (Charles) - Admin Dashboard.
@@ -119,4 +120,16 @@ export async function getStats() {
     // currencies this would need to be broken out per-currency instead.
     totalRevenueCents: Number(revenue.totalRevenueCents),
   };
+}
+
+/**
+ * Wipes the in-memory stock-data cache (see utils/cache.js) so the next
+ * request re-reads MySQL instead of serving a stale cached value. Useful
+ * right after re-running ingestion/ingest.py if you don't want to wait out
+ * the cache's TTL or restart the server.
+ */
+export function clearCache() {
+  const entriesCleared = cacheSize();
+  cacheClear();
+  return { entriesCleared };
 }

@@ -9,10 +9,15 @@
  *
  * Quick-win additions: summary stat cards, a search box, and per-user
  * payment history (expand a row to fetch it on demand).
+ *
+ * Clear cache button: the stock data endpoints (server/src/services/
+ * stockLookup.service.js) cache reads in memory for a few minutes (see
+ * utils/cache.js) - this button lets an admin force a refresh right after
+ * re-running the ingestion pipeline instead of waiting out the TTL.
  */
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { listUsers, revokeUser, restoreUser, setAdmin, getStats, getUserPayments } from "../api/admin";
+import { listUsers, revokeUser, restoreUser, setAdmin, getStats, getUserPayments, clearCache } from "../api/admin";
 import { colors, fonts, fontWeights } from "../theme";
 
 function fmtDate(iso) {
@@ -104,6 +109,8 @@ export default function Admin() {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState(null);
   const [paymentsByUser, setPaymentsByUser] = useState({});
+  const [cacheBusy, setCacheBusy] = useState(false);
+  const [cacheMsg, setCacheMsg] = useState("");
 
   function load() {
     setLoading(true);
@@ -170,14 +177,57 @@ export default function Admin() {
     }
   }
 
+  async function handleClearCache() {
+    setCacheBusy(true);
+    setCacheMsg("");
+    try {
+      const result = await clearCache();
+      setCacheMsg(`Cache cleared (${result.entriesCleared} entr${result.entriesCleared === 1 ? "y" : "ies"}).`);
+    } catch (err) {
+      setCacheMsg(`Failed: ${err.message}`);
+    } finally {
+      setCacheBusy(false);
+    }
+  }
+
   return (
     <section style={{ padding: 28 }}>
-      <h1 style={{ fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel, fontSize: 20, margin: "0 0 4px", color: colors.darkMenu }}>
-        Admin - Users
-      </h1>
-      <p style={{ fontFamily: fonts.description, fontSize: 13, color: colors.mutedText, margin: "0 0 18px" }}>
-        Revoking access flips the same flag the paywall checks - it doesn't delete anything.
-      </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 style={{ fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel, fontSize: 20, margin: "0 0 4px", color: colors.darkMenu }}>
+            Admin - Users
+          </h1>
+          <p style={{ fontFamily: fonts.description, fontSize: 13, color: colors.mutedText, margin: "0 0 18px" }}>
+            Revoking access flips the same flag the paywall checks - it doesn't delete anything.
+          </p>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <button
+            type="button"
+            onClick={handleClearCache}
+            disabled={cacheBusy}
+            title="Force-refresh stock data (market cap, prices, financials) instead of waiting out the cache TTL"
+            style={{
+              padding: "8px 14px",
+              borderRadius: 8,
+              border: `1px solid ${colors.border}`,
+              fontFamily: fonts.description,
+              fontSize: 12,
+              color: colors.darkMenu,
+              background: "#fff",
+              cursor: cacheBusy ? "not-allowed" : "pointer",
+              opacity: cacheBusy ? 0.6 : 1,
+            }}
+          >
+            {cacheBusy ? "Clearing..." : "Clear data cache"}
+          </button>
+          {cacheMsg && (
+            <div style={{ fontFamily: fonts.description, fontSize: 11, color: colors.mutedText, marginTop: 4 }}>
+              {cacheMsg}
+            </div>
+          )}
+        </div>
+      </div>
 
       {stats && (
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
