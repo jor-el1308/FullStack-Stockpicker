@@ -134,3 +134,15 @@ export async function saveCriteriaSet(req, res) {
     res.status(500).json({ success: false, error: { message: err.message } });
   }
 }
+
+export async function deleteCriteriaSet(req, res) {
+  try {
+    const deleted = await authService.deleteCriteriaSet(req.userId, req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ success: false, error: { message: "Criteria set not found" } });
+    }
+    res.json({ success: true, data: { id: req.params.id } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { message: err.message } });
+  }
+}
