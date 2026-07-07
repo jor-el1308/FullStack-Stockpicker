@@ -15,5 +15,6 @@ router.get("/me", requireAuth, authController.getProfile);
 // Saved criteria sets ("Criteria 1, 2, 3 quick-select" feature)
 router.get("/me/criteria-sets", requireAuth, authController.listCriteriaSets);
 router.post("/me/criteria-sets", requireAuth, authController.saveCriteriaSet);
+router.delete("/me/criteria-sets/:id", requireAuth, authController.deleteCriteriaSet);
 
 export default router;
