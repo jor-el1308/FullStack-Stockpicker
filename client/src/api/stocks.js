@@ -1,61 +1,71 @@
-// Stock/screener-specific calls. Uses the shared `api` wrapper from client.js —
-// do not fetch() directly here, so auth headers and error handling stay consistent.
-//
-// Shapes below follow shared/types/index.js:
-//   ScreenerRequest    = { criteria, exchanges?, excludeSectors?, minCompanyAgeYears? }
-//   ScreenerResponse   = { criteriaUsed, results: ScreenerResultRow[] }
-//   ScreenerResultRow  = StockIdentity & { values: Partial<Record<CriteriaKey, number>> }
-//   StockDetail        = StockIdentity & { latestMarketCap?, fiftyTwoWeekHigh?,
-//                          fiftyTwoWeekLow?, financials: FinancialsPerYear[], dividends: DividendPerYear[] }
-//                        (priceHistory is fetched separately, see getStockPrices)
-//   DailyPrice[]       = the /prices response
+import { colors, fonts } from "../theme";
+import { labelFor, formatValue } from "../screener/criteria";
 
-import { api } from "./client";
+/**
+ * Owner: Person 4 (Enrico) - Dashboard & Stock Report Page.
+ * Renders the results table described in the requirement doc (section 5b):
+ * Exchange, Stock Code, Stock Name, then one column per criteria value.
+ * Shared by the Dashboard and the Screener so both stay visually consistent.
+ *
+ * @param {{ rows: import("../../../shared/types/index.js").ScreenerResultRow[], onRowClick?: (row) => void, emptyMessage?: string }} props
+ */
+export default function ResultsTable({ rows, onRowClick, emptyMessage }) {
+  if (rows.length === 0) {
+    return (
+      <p style={{ fontFamily: fonts.description, color: colors.mutedText ?? "#5B6B85", fontSize: 13 }}>
+        {emptyMessage ?? "No results yet. Run the screener above."}
+      </p>
+    );
+  }
 
-// POST /api/screener/run — the filter engine. Pass a ScreenerRequest; an empty
-// object runs the backend's default screen.
-export function runScreener(request = {}) {
-  return api.post("/screener/run", request);
-}
+  const criteriaKeys = Array.from(new Set(rows.flatMap((r) => Object.keys(r.values))));
+  const hasScore = rows.some((r) => r.score != null);
 
-// GET /api/screener/default-criteria — sensible starting criteria for the UI.
-export async function getDefaultCriteria() {
-  const data = await api.get("/screener/default-criteria");
-  return data.criteria;
-}
-
-// Convenience for the Dashboard: default screen, unwrapped to just the rows,
-// since ResultsTable only needs ScreenerResultRow[].
-export async function getStocks() {
-  const response = await runScreener({});
-  return response.results;
-}
-
-// GET /api/stocks/:exchangeCode/:stockCode — everything on StockDetail
-// EXCEPT price history (fetched separately below).
-export function getStockDetail(exchangeCode, stockCode) {
-  return api.get(`/stocks/${exchangeCode}/${stockCode}`);
-}
-
-// GET /api/stocks/:exchangeCode/:stockCode/prices — DailyPrice[], used for the
-// closing-price chart and to derive current price / day change.
-export function getStockPrices(exchangeCode, stockCode) {
-  return api.get(`/stocks/${exchangeCode}/${stockCode}/prices`);
-}
-
-// ---------- Saved screens (criteria sets tied to the logged-in user) ----------
-
-// GET /api/auth/me/criteria-sets — [{ id, name, createdAt, criteria: CriteriaRange[] }]
-export function listSavedScreens() {
-  return api.get("/auth/me/criteria-sets");
-}
-
-// POST /api/auth/me/criteria-sets — { name, criteria } (criteria need min and/or max)
-export function saveScreen(name, criteria) {
-  return api.post("/auth/me/criteria-sets", { name, criteria });
-}
-
-// DELETE /api/auth/me/criteria-sets/:id
-export function deleteScreen(id) {
-  return api.delete(`/auth/me/criteria-sets/${id}`);
+  return (
+    <table className="results-table">
+      <thead>
+        <tr>
+          <th>Exchange</th>
+          <th>Stock Code</th>
+          <th>Stock Name</th>
+          {criteriaKeys.map((key) => (
+            <th key={key} className="numeric">
+              {labelFor(key)}
+            </th>
+          ))}
+          {hasScore && <th className="numeric">Score</th>}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr
+            key={`${row.exchangeCode}-${row.stockCode}`}
+            onClick={() => onRowClick?.(row)}
+            style={{ cursor: onRowClick ? "pointer" : "default" }}
+          >
+            <td>{row.exchangeCode}</td>
+            <td className="numeric">{row.stockCode}</td>
+            <td>{row.stockName}</td>
+            {criteriaKeys.map((key) => {
+              const value = row.values[key];
+              return (
+                <td
+                  key={key}
+                  className="numeric"
+                  style={{ color: value != null && value < 0 ? colors.badNumber : colors.goodNumber }}
+                >
+                  {formatValue(key, value)}
+                </td>
+              );
+            })}
+            {hasScore && (
+              <td className="numeric" style={{ color: colors.special }}>
+                {row.score != null ? row.score : "—"}
+              </td>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
