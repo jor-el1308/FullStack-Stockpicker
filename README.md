@@ -10,6 +10,7 @@ this README covers the scaffold only.
 - **Frontend:** React (Vite) + JavaScript (JSX), React Router
 - **Backend:** Node.js + Express + JavaScript (native ES modules)
 - **Data ingestion:** standalone Python script (`yfinance`) that populates MySQL
+- **Payments:** Stripe Checkout, TEST MODE only (real Stripe infra, fake test cards, nothing charged)
 - **Database:** MySQL
 - **Shared:** a `shared/` package of JSDoc type definitions used by both
   sides so the API contract stays documented while each workstream builds
@@ -29,7 +30,7 @@ shared/     Shared JSDoc typedefs (ScreenerRequest, StockDetail, etc.)
 | Person | Area | Main folders |
 |---|---|---|
 | 1 — Yong Wee | Auth & User Management | `server/src/{routes,controllers,services}/auth.*`, `client/src/pages/Login.jsx` |
-| 2 — Charles | Data Collection & Database Design | `server/src/db/schema.sql`, `ingestion/` (yfinance pipeline), `server/src/routes/stocks.routes.js` |
+| 2 — Charles | Data Pipeline + Subscription/Paywall | `server/src/db/schema.sql`, `ingestion/` (yfinance pipeline), `server/src/{routes,controllers,services}/subscription.*`, `client/src/pages/Activate.jsx` |
 | 3 — Jorel | Screener / Filter Engine | `server/src/{routes,controllers,services}/screener.*`, `client/src/pages/Screener.jsx` |
 | 4 — Enrico | Dashboard & Stock Report Page | `server/src/{routes,controllers}/dashboard.*`, `client/src/pages/{Dashboard,StockDetail}.jsx`, `client/src/components/ResultsTable.jsx` |
 | 5 — Jayden | Notifications & Optional AI Step | `server/src/{routes,controllers,services}/notifications.*`, `client/src/pages/Watchlist.jsx` |
@@ -39,6 +40,12 @@ filled in with working queries (not just stubs) so everyone else can build
 against real data early. Every other route/controller file currently returns
 `501 Not Implemented` as a placeholder — replace with real logic in your
 workstream's files.
+
+**Paywall note:** every route except `/api/auth/*` and `/api/subscription/*`
+now requires the logged-in user to have an active (paid) account - see
+`server/src/middleware/subscription.middleware.js`. New signups start
+inactive and get redirected to `/activate` until they pay the one-time
+activation fee.
 
 ## Getting started
 
@@ -69,7 +76,26 @@ workstream's files.
    it almost always means `server/.env` doesn't exist yet (so it fell back
    to an empty password) - double check step 2's `cp` ran.
 
-3. **Load real data** (replaces the old `db:seed` sample rows):
+   **If you migrated before the subscription/paywall feature existed**,
+   `CREATE TABLE IF NOT EXISTS` won't add the new columns to your existing
+   `users` table - run the catch-up migration once:
+   ```
+   mysql -u stockpicker -p stockpicker < server/src/db/migrations/001_add_subscription.sql
+   ```
+   (or paste that file's contents into a MySQL Workbench SQL tab if `mysql`
+   isn't on your PATH).
+
+3. **Set up Stripe (test mode)** for the activation-fee paywall:
+   - Sign up free at https://dashboard.stripe.com/register - no business
+     verification needed to use test mode.
+   - Make sure the "Test mode" toggle in the dashboard is switched on.
+   - Go to Developers -> API keys, copy the **Secret key** (starts `sk_test_`).
+   - Add it to `server/.env`: `STRIPE_SECRET_KEY=sk_test_...`
+   - When paying in the app, use Stripe's test card `4242 4242 4242 4242`,
+     any future expiry date, any 3-digit CVC.
+   - Never put a real (`sk_live_`) key here - test keys can't move real money.
+
+4. **Load real data** (replaces the old `db:seed` sample rows):
    ```
    cd ingestion
    python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
@@ -82,7 +108,7 @@ workstream's files.
    etc). `npm run db:seed --workspace=server` still works if you just want
    the old 4-row placeholder data instead.
 
-4. **Run the app:**
+5. **Run the app:**
    ```
    npm run dev:server   # http://localhost:4000
    npm run dev:client   # http://localhost:5173 (proxies /api to the server)
@@ -121,3 +147,6 @@ the code was written without relying on any JS-only syntax.
   scale and the data pipeline's rate-limit strategy).
 - EBITA vs EBITDA, missing listed/IPO dates, and cross-currency dividend
   comparison — see `ingestion/README.md` "Known limitations" for detail.
+- Payments are Stripe **test mode** only (one-time activation fee, no
+  recurring billing) - a real launch would need live keys, webhook
+  handling for reliability, and a decision on recurring vs one-time billing.

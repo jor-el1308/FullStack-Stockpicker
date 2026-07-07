@@ -105,7 +105,27 @@ CREATE TABLE IF NOT EXISTS users (
   email         VARCHAR(255) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   name          VARCHAR(128) NOT NULL,
+  -- Subscription/paywall (Person 2): new accounts start inactive and must
+  -- pay a one-time activation fee before accessing anything past login.
+  -- See `payment` table below and server/src/services/subscription.service.js.
+  is_active     TINYINT(1) NOT NULL DEFAULT 0,
+  activated_at  TIMESTAMP NULL DEFAULT NULL,
   created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- Owner: Person 2 (Charles) - Subscription/Paywall.
+-- One row per (mock) payment attempt. This is a MOCK payment record, not a
+-- real processor integration - see subscription.service.js for details.
+CREATE TABLE IF NOT EXISTS payment (
+  id             CHAR(36) PRIMARY KEY DEFAULT (UUID()),
+  user_id        CHAR(36) NOT NULL,
+  amount_cents   INT NOT NULL,
+  currency       VARCHAR(8) NOT NULL DEFAULT 'USD',
+  status         ENUM('succeeded', 'failed') NOT NULL DEFAULT 'succeeded',
+  payment_method VARCHAR(32) NOT NULL DEFAULT 'mock',
+  paid_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_payment_user FOREIGN KEY (user_id)
+    REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS saved_criteria_set (

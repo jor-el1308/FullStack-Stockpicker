@@ -2,6 +2,11 @@
  * Owner: Person 1 (Yong Wee) - Auth & User Management.
  * Login/signup form (POST /api/auth/login, /api/auth/signup) plus, once
  * logged in, a minimal account panel confirming the logged-in user.
+ *
+ * NOTE for Person 1 (added by Person 2 for the subscription/paywall feature -
+ * please review): after signup/login, new/unpaid accounts (isActive: false)
+ * now route to /activate instead of straight to "/" - see handleSubmit()
+ * below and client/src/pages/Activate.jsx.
  */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -47,7 +52,9 @@ function AuthForm({ onAuthenticated }) {
           : { email: form.email, password: form.password, name: form.name };
       const data = await api.post(path, body);
       onAuthenticated(data.user, data.token);
-      navigate("/");
+      // Subscription/paywall (Person 2): unpaid accounts go to /activate
+      // instead of the main app.
+      navigate(data.user.isActive ? "/" : "/activate");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -148,6 +155,9 @@ function AccountPanel({ user, onLogout }) {
         </h1>
         <p style={{ marginTop: 0 }}>
           Logged in as <strong>{user.name}</strong> ({user.email})
+        </p>
+        <p style={{ fontSize: 13, color: user.isActive ? "#00A86B" : "#D16B6B" }}>
+          {user.isActive ? "Account active" : "Account not activated - payment required"}
         </p>
         <button type="button" onClick={onLogout} className="auth-button" style={{ width: "auto" }}>
           Log Out

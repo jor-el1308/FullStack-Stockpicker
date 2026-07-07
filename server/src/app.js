@@ -4,6 +4,7 @@ import helmet from "helmet";
 import "dotenv/config";
 
 import authRoutes from "./routes/auth.routes.js";
+import subscriptionRoutes from "./routes/subscription.routes.js";
 import stocksRoutes from "./routes/stocks.routes.js";
 import screenerRoutes from "./routes/screener.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
@@ -22,10 +23,11 @@ export function createApp() {
 
   // Each route module is owned by one workstream (see README "Team ownership").
   app.use("/api/auth", authRoutes); // Person 1
-  app.use("/api/stocks", stocksRoutes); // Person 2
-  app.use("/api/screener", screenerRoutes); // Person 3
-  app.use("/api/dashboard", dashboardRoutes); // Person 4
-  app.use("/api/notifications", notificationsRoutes); // Person 5
+  app.use("/api/subscription", subscriptionRoutes); // Person 2 - Paywall (deliberately NOT gated by requireActiveAccount)
+  app.use("/api/stocks", stocksRoutes); // Person 2 - gated by requireAuth + requireActiveAccount
+  app.use("/api/screener", screenerRoutes); // Person 3 - gated by requireAuth + requireActiveAccount
+  app.use("/api/dashboard", dashboardRoutes); // Person 4 - gated by requireAuth + requireActiveAccount
+  app.use("/api/notifications", notificationsRoutes); // Person 5 - gated by requireAuth + requireActiveAccount
 
   // Fallback 404
   app.use((_req, res) => {
