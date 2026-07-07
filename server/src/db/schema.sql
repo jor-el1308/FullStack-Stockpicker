@@ -110,6 +110,11 @@ CREATE TABLE IF NOT EXISTS users (
   -- See `payment` table below and server/src/services/subscription.service.js.
   is_active     TINYINT(1) NOT NULL DEFAULT 0,
   activated_at  TIMESTAMP NULL DEFAULT NULL,
+  -- Admin dashboard (Person 2): flags an account as an administrator, able
+  -- to view all users and revoke/restore access. Nobody can self-serve
+  -- this - see server/src/db/migrations/002_add_admin_flag.sql to bootstrap
+  -- the first admin account manually.
+  is_admin      TINYINT(1) NOT NULL DEFAULT 0,
   created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
