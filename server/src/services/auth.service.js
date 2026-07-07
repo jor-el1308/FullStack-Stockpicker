@@ -113,6 +113,21 @@ export async function listCriteriaSets(userId) {
 }
 
 /**
+ * Delete a saved criteria set (and its items, via ON DELETE CASCADE).
+ * Scoped to the owning user so one user can't delete another's screens.
+ * @param {string} userId
+ * @param {string} setId
+ * @returns {Promise<boolean>} true if a row was deleted
+ */
+export async function deleteCriteriaSet(userId, setId) {
+  const [result] = await pool.query(
+    `DELETE FROM saved_criteria_set WHERE id = ? AND user_id = ?`,
+    [setId, userId]
+  );
+  return result.affectedRows > 0;
+}
+
+/**
  * @param {string} userId
  * @param {{ name: string, criteria: Array<{ key: string, min?: number, max?: number }> }} input
  */
