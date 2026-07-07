@@ -1,0 +1,30 @@
+# Keeps host-installed node_modules (and their Windows-compiled native
+# binaries) out of the image entirely - npm install runs fresh inside the
+# Linux container instead. The docker-compose.yml volumes also guard
+# against these leaking in at runtime via bind mounts.
+node_modules
+*/node_modules
+
+.git
+.gitignore
+
+# Env files - real secrets should only reach containers via docker-compose's
+# environment: block (backed by root .env), never baked into an image layer.
+.env
+*/.env
+.env.local
+
+dist
+build
+*/dist
+*/build
+
+# Python ingestion pipeline isn't part of either Docker image.
+ingestion/venv
+ingestion/__pycache__
+**/__pycache__
+*.pyc
+
+coverage
+*.log
+.DS_Store

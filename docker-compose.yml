@@ -1,0 +1,84 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${DB_NAME:-stockpicker}
+      MYSQL_USER: ${DB_USER:-stockpicker}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-changeme}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpass}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      NODE_ENV: development
+      CLIENT_ORIGIN: http://localhost:5173
+      # Points at the "mysql" service (its hostname on the Docker network),
+      # not localhost - the app connects to the mysql container, not itself.
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-stockpicker}
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      DB_NAME: ${DB_NAME:-stockpicker}
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
+      JWT_EXPIRES_IN: 7d
+      STOCK_DATA_PROVIDER: ${STOCK_DATA_PROVIDER:-alpha_vantage}
+      ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      # Set to "false" to skip the auto-seed on every container start (e.g.
+      # once you've loaded real data via the ingestion pipeline).
+      AUTO_SEED: ${AUTO_SEED:-true}
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./server:/app/server
+      - ./shared:/app/shared
+      # Anonymous volume shadows a server/node_modules that might exist on
+      # the host (e.g. from running npm install outside Docker) so the
+      # bind mount above can't leak a Windows-installed node_modules into
+      # the Linux container.
+      - /app/server/node_modules
+
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - server
+    environment:
+      # Vite dev server: bind to all interfaces so the port mapping below
+      # actually reaches it, and proxy /api to the "server" service instead
+      # of its own localhost (see client/vite.config.js).
+      VITE_HOST: "0.0.0.0"
+      VITE_API_PROXY_TARGET: http://server:4000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./client:/app/client
+      - ./shared:/app/shared
+      # This one matters for real: your host already has a
+      # client/node_modules (from npm install run outside Docker) with
+      # Windows-compiled native binaries. Without this, the bind mount
+      # above would put that folder at /app/client/node_modules and Node
+      # would load it first, ahead of the container's own Linux install.
+      - /app/client/node_modules
+
+volumes:
+  mysql-data:

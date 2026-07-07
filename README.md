@@ -53,7 +53,55 @@ routes (view all users, revoke/restore access) - see
 admin; see `server/src/db/migrations/002_add_admin_flag.sql` for how to
 bootstrap the first admin account.
 
-## Getting started
+## Run with Docker (fastest way to get it running)
+
+If you have [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+installed, this replaces basically all of "Getting started" below with one
+command. No local MySQL, no manual migrations, no Node/Python version
+juggling — good for a friend testing the app, or for the teacher to run it
+without setting anything up themselves.
+
+```
+docker-compose up --build
+```
+
+That single command builds the client and server images, starts a MySQL
+container, waits for it to be healthy, then automatically:
+applies `schema.sql` and every file in `server/src/db/migrations/` (safe to
+re-run — they're idempotent), loads sample seed data, and starts both the
+API and the frontend dev server.
+
+- Frontend: http://localhost:5173
+- API: http://localhost:4000
+- MySQL: localhost:3306 (user `stockpicker` / password `changeme` by default)
+
+Code changes on your machine are picked up live (both containers bind-mount
+the source and hot-reload), so this works for active development too, not
+just a one-off demo.
+
+**Optional config:** copy `.env.example` to `.env` at the repo root to set a
+real Stripe test key (`STRIPE_SECRET_KEY=sk_test_...`) so the paywall/checkout
+flow works, or to change the default DB credentials. Everything else already
+has working defaults.
+
+**Useful commands:**
+```
+docker-compose up --build        # start everything (rebuilds if files changed)
+docker-compose up -d             # start in the background
+docker-compose down              # stop everything
+docker-compose down -v           # stop AND wipe the MySQL data volume (fresh DB next time)
+docker-compose logs -f server    # tail one service's logs
+```
+
+To become an admin, sign up through the running app, then connect to the
+`mysql` container and run the same bootstrap `UPDATE` shown in step 2 below
+(e.g. `docker-compose exec mysql mysql -u stockpicker -p stockpicker`).
+
+This doesn't change anything about the schema, the code, or how the app
+works — it's purely a setup wrapper. Everything in "Getting started" below
+still works if you'd rather run things natively without Docker.
+
+## Getting started (without Docker)
 
 1. **Install Node dependencies** (from repo root):
    ```
@@ -82,15 +130,13 @@ bootstrap the first admin account.
    it almost always means `server/.env` doesn't exist yet (so it fell back
    to an empty password) - double check step 2's `cp` ran.
 
-   **If you migrated before the subscription/paywall or admin features
-   existed**, `CREATE TABLE IF NOT EXISTS` won't add the new columns to
-   your existing `users` table - run the catch-up migrations once:
-   ```
-   mysql -u stockpicker -p stockpicker < server/src/db/migrations/001_add_subscription.sql
-   mysql -u stockpicker -p stockpicker < server/src/db/migrations/002_add_admin_flag.sql
-   ```
-   (or paste each file's contents into a MySQL Workbench SQL tab if `mysql`
-   isn't on your PATH).
+   `npm run db:migrate` now also applies every file in
+   `server/src/db/migrations/` automatically (in order, after `schema.sql`),
+   so a fresh database and a database you've had since before the
+   subscription/paywall or admin features existed both end up on the same
+   schema — no separate manual step needed. If you ever do need to run one
+   by hand (e.g. `mysql` isn't on your PATH so you're pasting into MySQL
+   Workbench instead), the files are numbered and safe to re-run.
 
    **To make your own account an admin**, sign up through the app first,
    then run:
