@@ -4,6 +4,12 @@ import { createContext, useCallback, useContext, useState } from "react";
  * Owner: Person 1 (Yong Wee) - Auth & User Management.
  * Shares the logged-in user across the app (nav bar, Login/account page, etc.)
  * and keeps localStorage (read by client/src/api/client.js) in sync.
+ *
+ * NOTE for Person 1 (added by Person 2 for the subscription/paywall feature -
+ * please review): user objects now carry `isActive`/`activatedAt` (see
+ * auth.controller.js's toAuthUser()). Added updateUser() below so the new
+ * Activate.jsx page can flip isActive to true right after a successful
+ * (mock) payment, without needing to re-issue a token through login().
  */
 const AuthContext = createContext(null);
 
@@ -31,7 +37,18 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
-  return <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>;
+  // Merges a partial update (e.g. { isActive: true, activatedAt } after
+  // paying) into the current user without touching the stored auth token.
+  const updateUser = useCallback((patch) => {
+    setUser((current) => {
+      if (!current) return current;
+      const next = { ...current, ...patch };
+      localStorage.setItem("authUser", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  return <AuthContext.Provider value={{ user, login, logout, updateUser }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

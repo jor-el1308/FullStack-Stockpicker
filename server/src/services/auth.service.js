@@ -8,6 +8,12 @@ import { pool } from "../config/db.js";
  *
  * Password hashing (bcryptjs), JWT issuance (jsonwebtoken), and CRUD against
  * the `users` / `saved_criteria_set` / `saved_criteria_item` tables.
+ *
+ * NOTE for Person 1 (added by Person 2 for the subscription/paywall feature -
+ * please review): findUserByEmail/findUserById now also select
+ * is_active/activated_at so the frontend/controller can tell whether a user
+ * still needs to pay the activation fee. New users default to is_active = 0
+ * at the DB level (see schema.sql) - createUser() doesn't need to set it.
  */
 
 const SALT_ROUNDS = 10;
@@ -41,7 +47,8 @@ export function issueToken(user) {
  */
 export async function findUserByEmail(email) {
   const [rows] = await pool.query(
-    `SELECT id, email, password_hash AS passwordHash, name, created_at AS createdAt
+    `SELECT id, email, password_hash AS passwordHash, name, created_at AS createdAt,
+            is_active AS isActive, activated_at AS activatedAt
      FROM users WHERE email = ? LIMIT 1`,
     [email]
   );
@@ -53,7 +60,8 @@ export async function findUserByEmail(email) {
  */
 export async function findUserById(id) {
   const [rows] = await pool.query(
-    `SELECT id, email, name, created_at AS createdAt FROM users WHERE id = ? LIMIT 1`,
+    `SELECT id, email, name, created_at AS createdAt, is_active AS isActive, activated_at AS activatedAt
+     FROM users WHERE id = ? LIMIT 1`,
     [id]
   );
   return rows[0] ?? null;
@@ -65,6 +73,8 @@ export async function findUserById(id) {
 export async function createUser({ email, password, name }) {
   const id = randomUUID();
   const passwordHash = await hashPassword(password);
+  // is_active defaults to 0 at the DB level (see schema.sql) - new accounts
+  // start inactive until they pay via POST /api/subscription/pay.
   await pool.query(`INSERT INTO users (id, email, password_hash, name) VALUES (?, ?, ?, ?)`, [
     id,
     email,

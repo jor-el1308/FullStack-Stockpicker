@@ -3,6 +3,12 @@ import * as authService from "../services/auth.service.js";
 
 /**
  * Owner: Person 1 (Yong Wee) - Auth & User Management.
+ *
+ * NOTE for Person 1 (added by Person 2 for the subscription/paywall feature -
+ * please review): toAuthUser() now also exposes isActive/activatedAt so the
+ * frontend knows right after signup/login whether to route the user to the
+ * payment page (client/src/pages/Activate.jsx) or straight into the app.
+ * New accounts come back with isActive: false until they pay.
  */
 
 const signupSchema = z.object({
@@ -32,7 +38,14 @@ const saveCriteriaSetSchema = z.object({
 });
 
 function toAuthUser(user) {
-  return { id: user.id, email: user.email, name: user.name, createdAt: user.createdAt };
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    createdAt: user.createdAt,
+    isActive: Boolean(user.isActive),
+    activatedAt: user.activatedAt ?? null,
+  };
 }
 
 function badRequest(res, parsed) {

@@ -1,5 +1,6 @@
-import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation } from "react-router-dom";
 import Login from "./pages/Login";
+import Activate from "./pages/Activate";
 import Screener from "./pages/Screener";
 import Dashboard from "./pages/Dashboard";
 import StockDetail from "./pages/StockDetail";
@@ -37,22 +38,69 @@ function NavBar() {
   );
 }
 
+/**
+ * Paywall route guard (Person 2 - Subscription/Paywall).
+ * If a user is logged in but hasn't paid the activation fee yet
+ * (user.isActive === false), every route except /activate and /login
+ * redirects to /activate. Mirrors the server-side gate in
+ * server/src/middleware/subscription.middleware.js - this is purely a UX
+ * nicety (avoid flashing paywalled content); the API still enforces the
+ * real gate independently.
+ */
+function RequireActive({ children }) {
+  const { user } = useAuth();
+  if (user && !user.isActive) {
+    return <Navigate to="/activate" replace />;
+  }
+  return children;
+}
+
 function AppLayout() {
   const { user } = useAuth();
   const { pathname } = useLocation();
   const isAuthScreen = pathname === "/login" && !user;
+  const isActivateScreen = pathname === "/activate";
 
   return (
     <div style={{ minHeight: "100vh" }}>
-      {!isAuthScreen && <NavBar />}
+      {!isAuthScreen && !isActivateScreen && <NavBar />}
 
-      <main style={isAuthScreen ? undefined : { padding: 24 }}>
+      <main style={isAuthScreen || isActivateScreen ? undefined : { padding: 24 }}>
         <Routes>
-          <Route path="/" element={<Screener />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/stock/:exchangeCode/:stockCode" element={<StockDetail />} />
-          <Route path="/watchlist" element={<Watchlist />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/activate" element={<Activate />} />
+          <Route
+            path="/"
+            element={
+              <RequireActive>
+                <Screener />
+              </RequireActive>
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <RequireActive>
+                <Dashboard />
+              </RequireActive>
+            }
+          />
+          <Route
+            path="/stock/:exchangeCode/:stockCode"
+            element={
+              <RequireActive>
+                <StockDetail />
+              </RequireActive>
+            }
+          />
+          <Route
+            path="/watchlist"
+            element={
+              <RequireActive>
+                <Watchlist />
+              </RequireActive>
+            }
+          />
         </Routes>
       </main>
     </div>
