@@ -2,12 +2,23 @@ import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation } from "re
 import Login from "./pages/Login";
 import Activate from "./pages/Activate";
 import Screener from "./pages/Screener";
+import AdvancedFilters from "./pages/AdvancedFilters";
+import SavedScreens from "./pages/SavedScreens";
 import Dashboard from "./pages/Dashboard";
 import StockDetail from "./pages/StockDetail";
 import Watchlist from "./pages/Watchlist";
 import Admin from "./pages/Admin";
 import { colors } from "./theme";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { ScreenerProvider } from "./context/ScreenerContext";
+
+const linkStyle = ({ isActive }) => ({
+  color: "#fff",
+  opacity: isActive ? 1 : 0.75,
+  fontWeight: isActive ? 600 : 400,
+  textDecoration: isActive ? "underline" : "none",
+  textUnderlineOffset: 6,
+});
 
 function NavBar() {
   const { user } = useAuth();
@@ -23,17 +34,23 @@ function NavBar() {
       }}
     >
       <strong>Stock Screener</strong>
-      <NavLink to="/" style={{ color: "#fff" }} end>
+      <NavLink to="/" style={linkStyle} end>
         Screener
       </NavLink>
-      <NavLink to="/dashboard" style={{ color: "#fff" }}>
+      <NavLink to="/filters" style={linkStyle}>
+        Advanced Filters
+      </NavLink>
+      <NavLink to="/saved" style={linkStyle}>
+        Saved Screens
+      </NavLink>
+      <NavLink to="/dashboard" style={linkStyle}>
         Dashboard
       </NavLink>
-      <NavLink to="/watchlist" style={{ color: "#fff" }}>
+      <NavLink to="/watchlist" style={linkStyle}>
         Watchlist
       </NavLink>
       {user?.isAdmin && (
-        <NavLink to="/admin" style={{ color: "#fff" }}>
+        <NavLink to="/admin" style={linkStyle}>
           Admin
         </NavLink>
       )}
@@ -98,6 +115,22 @@ function AppLayout() {
             }
           />
           <Route
+            path="/filters"
+            element={
+              <RequireActive>
+                <AdvancedFilters />
+              </RequireActive>
+            }
+          />
+          <Route
+            path="/saved"
+            element={
+              <RequireActive>
+                <SavedScreens />
+              </RequireActive>
+            }
+          />
+          <Route
             path="/dashboard"
             element={
               <RequireActive>
@@ -138,9 +171,11 @@ function AppLayout() {
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <AppLayout />
-      </BrowserRouter>
+      <ScreenerProvider>
+        <BrowserRouter>
+          <AppLayout />
+        </BrowserRouter>
+      </ScreenerProvider>
     </AuthProvider>
   );
 }
