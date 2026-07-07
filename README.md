@@ -30,7 +30,7 @@ shared/     Shared JSDoc typedefs (ScreenerRequest, StockDetail, etc.)
 | Person | Area | Main folders |
 |---|---|---|
 | 1 — Yong Wee | Auth & User Management | `server/src/{routes,controllers,services}/auth.*`, `client/src/pages/Login.jsx` |
-| 2 — Charles | Data Pipeline + Subscription/Paywall | `server/src/db/schema.sql`, `ingestion/` (yfinance pipeline), `server/src/{routes,controllers,services}/subscription.*`, `client/src/pages/Activate.jsx` |
+| 2 — Charles | Data Pipeline + Subscription/Paywall + Admin Dashboard | `server/src/db/schema.sql`, `ingestion/` (yfinance pipeline), `server/src/{routes,controllers,services}/{subscription,admin}.*`, `client/src/pages/{Activate,Admin}.jsx` |
 | 3 — Jorel | Screener / Filter Engine | `server/src/{routes,controllers,services}/screener.*`, `client/src/pages/Screener.jsx` |
 | 4 — Enrico | Dashboard & Stock Report Page | `server/src/{routes,controllers}/dashboard.*`, `client/src/pages/{Dashboard,StockDetail}.jsx`, `client/src/components/ResultsTable.jsx` |
 | 5 — Jayden | Notifications & Optional AI Step | `server/src/{routes,controllers,services}/notifications.*`, `client/src/pages/Watchlist.jsx` |
@@ -41,11 +41,17 @@ against real data early. Every other route/controller file currently returns
 `501 Not Implemented` as a placeholder — replace with real logic in your
 workstream's files.
 
-**Paywall note:** every route except `/api/auth/*` and `/api/subscription/*`
-now requires the logged-in user to have an active (paid) account - see
-`server/src/middleware/subscription.middleware.js`. New signups start
-inactive and get redirected to `/activate` until they pay the one-time
-activation fee.
+**Paywall note:** every route except `/api/auth/*`, `/api/subscription/*`,
+and `/api/admin/*` now requires the logged-in user to have an active (paid)
+account - see `server/src/middleware/subscription.middleware.js`. New
+signups start inactive and get redirected to `/activate` until they pay
+the one-time activation fee.
+
+**Admin note:** `users.is_admin` gates the `/admin` page and `/api/admin/*`
+routes (view all users, revoke/restore access) - see
+`server/src/middleware/admin.middleware.js`. Nobody can self-promote to
+admin; see `server/src/db/migrations/002_add_admin_flag.sql` for how to
+bootstrap the first admin account.
 
 ## Getting started
 
@@ -76,14 +82,21 @@ activation fee.
    it almost always means `server/.env` doesn't exist yet (so it fell back
    to an empty password) - double check step 2's `cp` ran.
 
-   **If you migrated before the subscription/paywall feature existed**,
-   `CREATE TABLE IF NOT EXISTS` won't add the new columns to your existing
-   `users` table - run the catch-up migration once:
+   **If you migrated before the subscription/paywall or admin features
+   existed**, `CREATE TABLE IF NOT EXISTS` won't add the new columns to
+   your existing `users` table - run the catch-up migrations once:
    ```
    mysql -u stockpicker -p stockpicker < server/src/db/migrations/001_add_subscription.sql
+   mysql -u stockpicker -p stockpicker < server/src/db/migrations/002_add_admin_flag.sql
    ```
-   (or paste that file's contents into a MySQL Workbench SQL tab if `mysql`
+   (or paste each file's contents into a MySQL Workbench SQL tab if `mysql`
    isn't on your PATH).
+
+   **To make your own account an admin**, sign up through the app first,
+   then run:
+   ```sql
+   UPDATE users SET is_admin = 1 WHERE email = 'you@example.com';
+   ```
 
 3. **Set up Stripe (test mode)** for the activation-fee paywall:
    - Sign up free at https://dashboard.stripe.com/register - no business
@@ -150,3 +163,6 @@ the code was written without relying on any JS-only syntax.
 - Payments are Stripe **test mode** only (one-time activation fee, no
   recurring billing) - a real launch would need live keys, webhook
   handling for reliability, and a decision on recurring vs one-time billing.
+- Admin dashboard has no hard-delete for user accounts (revoke/restore
+  access only) - deliberate for now, since deleting a user's data is
+  irreversible and wasn't asked for; easy to add if the team wants it.

@@ -5,6 +5,7 @@ import Screener from "./pages/Screener";
 import Dashboard from "./pages/Dashboard";
 import StockDetail from "./pages/StockDetail";
 import Watchlist from "./pages/Watchlist";
+import Admin from "./pages/Admin";
 import { colors } from "./theme";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 
@@ -31,6 +32,11 @@ function NavBar() {
       <NavLink to="/watchlist" style={{ color: "#fff" }}>
         Watchlist
       </NavLink>
+      {user?.isAdmin && (
+        <NavLink to="/admin" style={{ color: "#fff" }}>
+          Admin
+        </NavLink>
+      )}
       <NavLink to="/login" style={{ color: "#fff", marginLeft: "auto" }}>
         {user ? `Account (${user.name})` : "Login"}
       </NavLink>
@@ -51,6 +57,20 @@ function RequireActive({ children }) {
   const { user } = useAuth();
   if (user && !user.isActive) {
     return <Navigate to="/activate" replace />;
+  }
+  return children;
+}
+
+/**
+ * Admin route guard (Person 2 - Admin Dashboard).
+ * Non-admins (or logged-out users) get bounced to the screener instead of
+ * seeing the admin page. Mirrors the server-side requireAdmin middleware -
+ * a UX nicety, not the real security boundary (the API enforces that).
+ */
+function RequireAdmin({ children }) {
+  const { user } = useAuth();
+  if (!user || !user.isAdmin) {
+    return <Navigate to="/" replace />;
   }
   return children;
 }
@@ -99,6 +119,14 @@ function AppLayout() {
               <RequireActive>
                 <Watchlist />
               </RequireActive>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <RequireAdmin>
+                <Admin />
+              </RequireAdmin>
             }
           />
         </Routes>

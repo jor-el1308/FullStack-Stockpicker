@@ -9,9 +9,11 @@ import { pool } from "../config/db.js";
  * Must run AFTER requireAuth (see middleware/auth.middleware.js) since it
  * needs req.userId to already be set. Applied at the router level to
  * stocks/screener/dashboard/notifications - i.e. everything past login,
- * per the "paywall blocks everything until paid" decision. Auth routes and
- * the subscription routes themselves are deliberately NOT gated by this,
- * since a user has to be able to log in and pay before becoming active.
+ * per the "paywall blocks everything until paid" decision. Auth routes,
+ * subscription routes, and admin routes are deliberately NOT gated by
+ * this, since a user has to be able to log in and pay before becoming
+ * active, and an admin managing the system shouldn't be locked out by
+ * their own paywall status.
  *
  * @param {import("express").Request & { userId?: string }} req
  * @param {import("express").Response} res
