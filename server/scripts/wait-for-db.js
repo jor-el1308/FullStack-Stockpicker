@@ -1,5 +1,6 @@
 import mysql from "mysql2/promise";
 import "dotenv/config";
+import { getDbConnectionOptions } from "../src/config/dbEnv.js";
 
 /**
  * Blocks until MySQL accepts connections, or gives up after a timeout.
@@ -12,12 +13,7 @@ const MAX_ATTEMPTS = Number(process.env.DB_WAIT_ATTEMPTS ?? 30);
 const DELAY_MS = Number(process.env.DB_WAIT_DELAY_MS ?? 2000);
 
 async function tryConnect() {
-  const connection = await mysql.createConnection({
-    host: process.env.DB_HOST ?? "localhost",
-    port: Number(process.env.DB_PORT ?? 3306),
-    user: process.env.DB_USER ?? "stockpicker",
-    password: process.env.DB_PASSWORD ?? "",
-  });
+  const connection = await mysql.createConnection(getDbConnectionOptions());
   await connection.ping();
   await connection.end();
 }

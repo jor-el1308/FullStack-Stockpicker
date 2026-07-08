@@ -82,7 +82,10 @@ API and the frontend dev server.
 
 - Frontend: http://localhost:5173
 - API: http://localhost:4000
-- MySQL: localhost:3306 (user `stockpicker` / password `changeme` by default)
+- MySQL: localhost:3307 (user `stockpicker` / password `changeme` by default -
+  mapped to host port 3307, not the standard 3306, to avoid clashing with a
+  MySQL you might already have installed natively; the app itself always
+  talks to the container over the internal Docker network regardless)
 
 Code changes on your machine are picked up live (both containers bind-mount
 the source and hot-reload), so this works for active development too, not
@@ -109,6 +112,63 @@ To become an admin, sign up through the running app, then connect to the
 This doesn't change anything about the schema, the code, or how the app
 works — it's purely a setup wrapper. Everything in "Getting started" below
 still works if you'd rather run things natively without Docker.
+
+## Shared team database (optional)
+
+By default every team member's `mysql` container (or local MySQL install) is
+its own separate, empty database — good for individual dev work, but it
+means nobody sees anyone else's test data. If the team wants everyone
+pointed at one shared live database instead, use
+[Aiven's free MySQL tier](https://aiven.io/free-mysql-database): 1GB
+storage/RAM, genuinely free forever (not a trial), no credit card required.
+It does power off after a period of inactivity (you'll get an email
+warning first) and isn't meant for real production traffic, but for a
+class project's shared dev/demo database it's a solid fit.
+
+1. **One person sets it up:** sign up at
+   [console.aiven.io/signup](https://console.aiven.io/signup), create a new
+   project, then "Create service" → MySQL → pick the **Free** plan → pick
+   any region → create. Wait a minute or two for it to go from "Rebuilding"
+   to "Running".
+
+2. **Invite the rest of the team** to that Aiven project (Project settings →
+   Members) so everyone can see the same service's connection details
+   without sharing a password over chat.
+
+3. **Get the connection info** from the service's Overview page: Host,
+   Port, User, Password, and a **Download** link for the CA certificate.
+   Save that certificate as `server/aiven-ca.pem` in this repo (it's safe
+   to commit — it's a public verification cert, not a secret) so everyone
+   on the team gets it automatically via git.
+
+4. **Point the app at it.** These settings live in a root `.env` if you're
+   using Docker, or `server/.env` if running natively — see
+   `.env.example` / `server/.env.example`:
+   ```
+   DB_HOST=<the Host from Aiven>
+   DB_PORT=<the Port from Aiven>
+   DB_USER=<the User from Aiven>
+   DB_PASSWORD=<the Password from Aiven>
+   DB_SSL=true
+   DB_SSL_CA=server/aiven-ca.pem
+   ```
+   (Docker users: this only needs to go in the root `.env`, not
+   `server/.env` — Compose doesn't read `server/.env` at all. See the
+   `DB_HOST`/`DB_SSL` comments in `docker-compose.yml` if you want the
+   details on how that's wired through.)
+
+5. **Run migrations against it once:**
+   ```
+   npm run db:migrate --workspace=server
+   ```
+   (or, if running through Docker, `docker-compose exec server node scripts/migrate.js`
+   after restarting the stack with the new env vars). After that, everyone
+   on the team who sets the same `DB_*` values is reading/writing the same
+   database.
+
+You can always switch back to a local database later by clearing `DB_HOST`
+(Docker) or pointing it back at `localhost` (native) — nothing about the
+schema or app code depends on where MySQL is hosted.
 
 ## Getting started (without Docker)
 
