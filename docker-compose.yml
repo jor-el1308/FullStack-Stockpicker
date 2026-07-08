@@ -35,13 +35,23 @@ services:
       PORT: 4000
       NODE_ENV: development
       CLIENT_ORIGIN: http://localhost:5173
-      # Points at the "mysql" service (its hostname on the Docker network),
-      # not localhost - the app connects to the mysql container, not itself.
-      DB_HOST: mysql
-      DB_PORT: 3306
+      # Defaults to the "mysql" service (its hostname on the Docker
+      # network), not localhost. Override DB_HOST/DB_PORT/DB_USER/
+      # DB_PASSWORD in a root .env to point this at an external shared
+      # database instead (e.g. Aiven's free MySQL tier) - the local
+      # `mysql` service below just won't be used in that case, no need to
+      # remove it. See DB_SSL below if the external host requires TLS.
+      DB_HOST: ${DB_HOST:-mysql}
+      DB_PORT: ${DB_PORT:-3306}
       DB_USER: ${DB_USER:-stockpicker}
       DB_PASSWORD: ${DB_PASSWORD:-changeme}
       DB_NAME: ${DB_NAME:-stockpicker}
+      # Most external managed MySQL hosts require TLS - set DB_SSL=true and
+      # optionally DB_SSL_CA (path to a downloaded CA cert, readable inside
+      # the container - e.g. put it under server/ so the bind mount below
+      # picks it up). Not needed for the local mysql service.
+      DB_SSL: ${DB_SSL:-false}
+      DB_SSL_CA: ${DB_SSL_CA:-}
       JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
       JWT_EXPIRES_IN: 7d
       STOCK_DATA_PROVIDER: ${STOCK_DATA_PROVIDER:-alpha_vantage}
