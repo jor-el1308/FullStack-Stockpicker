@@ -163,7 +163,18 @@ still works if you'd rather run things natively without Docker.
      any future expiry date, any 3-digit CVC.
    - Never put a real (`sk_live_`) key here - test keys can't move real money.
 
-4. **Load real data** (replaces the old `db:seed` sample rows):
+4. **Set up welcome emails** (optional) - sent automatically once a new
+   account's activation payment goes through:
+   - Easiest for local testing: sign up free at https://ethereal.email,
+     which hands you a fake SMTP inbox (nothing is actually delivered, you
+     just see the rendered email on their site).
+   - Add its generated credentials to `server/.env`:
+     `SMTP_HOST=`, `SMTP_USER=`, `SMTP_PASSWORD=` (`SMTP_PORT` defaults to
+     `587`).
+   - Leave these blank to skip email sending entirely - activation still
+     works either way, it just logs a warning instead of sending.
+
+5. **Load real data** (replaces the old `db:seed` sample rows):
    ```
    cd ingestion
    python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
@@ -176,7 +187,7 @@ still works if you'd rather run things natively without Docker.
    etc). `npm run db:seed --workspace=server` still works if you just want
    the old 4-row placeholder data instead.
 
-5. **Run the app:**
+6. **Run the app:**
    ```
    npm run dev:server   # http://localhost:4000
    npm run dev:client   # http://localhost:5173 (proxies /api to the server)
