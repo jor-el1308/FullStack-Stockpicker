@@ -1,5 +1,6 @@
 import { z } from "zod";
 import * as authService from "../services/auth.service.js";
+import { sendOtpEmail } from "../utils/mailer.js";
 
 /**
  * Owner: Person 1 (Yong Wee) - Auth & User Management.
@@ -11,6 +12,10 @@ import * as authService from "../services/auth.service.js";
  * (client/src/pages/Activate.jsx) and whether to show the Admin nav link.
  * New accounts come back with isActive: false and isAdmin: false until
  * they pay / get promoted.
+ *
+ * NOTE for Person 1 (added by Person 2 for login 2FA - please review):
+ * login() no longer returns a session token directly - see its comment
+ * below. verifyLoginOtp() and resendLoginOtp() are the new step 2.
  */
 
 const signupSchema = z.object({
@@ -22,6 +27,15 @@ const signupSchema = z.object({
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+});
+
+const verifyOtpSchema = z.object({
+  preAuthToken: z.string().min(1),
+  code: z.string().length(6, "Code must be 6 digits"),
+});
+
+const resendOtpSchema = z.object({
+  preAuthToken: z.string().min(1),
 });
 
 const criteriaRangeSchema = z
@@ -83,6 +97,13 @@ export async function signup(req, res) {
   }
 }
 
+/**
+ * Step 1 of login 2FA (Person 1's flow, added by Person 2). A correct
+ * email+password no longer returns a session token directly - instead this
+ * emails a one-time code and hands back a short-lived preAuthToken. The
+ * client must then call verifyLoginOtp() below with that token + the code
+ * to actually get a session token.
+ */
 export async function login(req, res) {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) return badRequest(res, parsed);
@@ -95,8 +116,90 @@ export async function login(req, res) {
       return res.status(401).json({ success: false, error: { message: "Invalid email or password" } });
     }
 
+    const preAuthToken = authService.issuePreAuthToken(user);
+    const code = await authService.createLoginOtp(user.id);
+    const result = await sendOtpEmail({ to: user.email, name: user.name, code });
+    if (result.error) {
+      return res
+        .status(500)
+        .json({ success: false, error: { message: "Could not send verification code - please try again" } });
+    }
+
+    res.json({ success: true, data: { mfaRequired: true, preAuthToken, email: user.email } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { message: err.message } });
+  }
+}
+
+/**
+ * Step 2 of login 2FA: exchanges a preAuthToken + the emailed code for a
+ * real session token, the same shape login() used to return directly.
+ */
+export async function verifyLoginOtp(req, res) {
+  const parsed = verifyOtpSchema.safeParse(req.body);
+  if (!parsed.success) return badRequest(res, parsed);
+  const { preAuthToken, code } = parsed.data;
+
+  let userId;
+  try {
+    userId = authService.verifyPreAuthToken(preAuthToken);
+  } catch {
+    return res
+      .status(401)
+      .json({ success: false, error: { message: "Verification session expired - please log in again" } });
+  }
+
+  try {
+    const ok = await authService.verifyLoginOtp(userId, code);
+    if (!ok) {
+      return res.status(401).json({ success: false, error: { message: "Incorrect or expired code" } });
+    }
+
+    const user = await authService.findUserById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: { message: "User not found" } });
+    }
+
     const token = authService.issueToken(user);
     res.json({ success: true, data: { user: toAuthUser(user), token } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { message: err.message } });
+  }
+}
+
+/**
+ * Re-sends a fresh code for an in-progress login attempt (e.g. the first
+ * email got lost/delayed). Requires the same preAuthToken issued by
+ * login() - old codes for the user are invalidated by createLoginOtp().
+ */
+export async function resendLoginOtp(req, res) {
+  const parsed = resendOtpSchema.safeParse(req.body);
+  if (!parsed.success) return badRequest(res, parsed);
+
+  let userId;
+  try {
+    userId = authService.verifyPreAuthToken(parsed.data.preAuthToken);
+  } catch {
+    return res
+      .status(401)
+      .json({ success: false, error: { message: "Verification session expired - please log in again" } });
+  }
+
+  try {
+    const user = await authService.findUserById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: { message: "User not found" } });
+    }
+
+    const code = await authService.createLoginOtp(userId);
+    const result = await sendOtpEmail({ to: user.email, name: user.name, code });
+    if (result.error) {
+      return res
+        .status(500)
+        .json({ success: false, error: { message: "Could not resend verification code" } });
+    }
+
+    res.json({ success: true, data: { resent: true } });
   } catch (err) {
     res.status(500).json({ success: false, error: { message: err.message } });
   }
