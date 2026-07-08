@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import Stripe from "stripe";
 import { pool } from "../config/db.js";
+import { sendWelcomeEmail } from "../utils/mailer.js";
 
 /**
  * Owner: Person 2 (Charles) - Data Pipeline + Subscription/Paywall.
@@ -142,6 +143,20 @@ export async function verifyAndActivateFromSession(sessionId, expectedUserId) {
     currency: (session.currency ?? ACTIVATION_CURRENCY).toUpperCase(),
     paymentMethod: "stripe_test",
   });
+
+  // Welcome email (Person 2 - Subscription/Paywall): fires once the
+  // activation payment has actually been recorded, i.e. "payment went
+  // through". Best-effort only - a broken/unconfigured SMTP setup should
+  // never fail this response, since the account is already active by now.
+  try {
+    const [rows] = await pool.query(`SELECT name, email FROM users WHERE id = ? LIMIT 1`, [expectedUserId]);
+    const user = rows[0];
+    if (user) {
+      await sendWelcomeEmail({ to: user.email, name: user.name });
+    }
+  } catch (err) {
+    console.error("[subscription] Welcome email failed:", err.message);
+  }
 
   return { ...status, paymentStatus: session.payment_status };
 }
