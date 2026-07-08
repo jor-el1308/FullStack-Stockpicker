@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation, useNavigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Activate from "./pages/Activate";
 import Screener from "./pages/Screener";
@@ -8,56 +8,140 @@ import Dashboard from "./pages/Dashboard";
 import StockDetail from "./pages/StockDetail";
 import Watchlist from "./pages/Watchlist";
 import Admin from "./pages/Admin";
-import { colors } from "./theme";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ScreenerProvider } from "./context/ScreenerContext";
 
-const linkStyle = ({ isActive }) => ({
-  color: "#fff",
-  opacity: isActive ? 1 : 0.75,
-  fontWeight: isActive ? 600 : 400,
-  textDecoration: isActive ? "underline" : "none",
-  textUnderlineOffset: 6,
-});
+function sidebarLinkClass({ isActive }) {
+  return "app-sidebar-link" + (isActive ? " active" : "");
+}
 
-function NavBar() {
+/**
+ * Left sidebar nav - replaces the old top NavBar. Styled to match the dark
+ * sidebar on the login page (client/src/pages/Login.jsx / .auth-dark-*
+ * classes in index.css) so the app feels consistent before and after
+ * logging in. Icons are Bootstrap Icons (bootstrap-icons package, loaded
+ * as a webfont in main.jsx) - class names are "bi bi-<icon-name>".
+ *
+ * Nav items are grouped under section labels (Screening / Portfolio /
+ * Admin), mirroring the grouped-sidebar format from the reference design.
+ * The account menu lives in the top bar now, not here - see TopBar() below.
+ */
+function Sidebar() {
   const { user } = useAuth();
+
   return (
-    <nav
-      style={{
-        background: colors.darkMenu,
-        color: "#fff",
-        padding: "12px 24px",
-        display: "flex",
-        gap: 20,
-        alignItems: "center",
-      }}
-    >
-      <strong>Stock Screener</strong>
-      <NavLink to="/" style={linkStyle} end>
-        Screener
-      </NavLink>
-      <NavLink to="/filters" style={linkStyle}>
-        Advanced Filters
-      </NavLink>
-      <NavLink to="/saved" style={linkStyle}>
-        Saved Screens
-      </NavLink>
-      <NavLink to="/dashboard" style={linkStyle}>
-        Dashboard
-      </NavLink>
-      <NavLink to="/watchlist" style={linkStyle}>
-        Watchlist
-      </NavLink>
-      {user?.isAdmin && (
-        <NavLink to="/admin" style={linkStyle}>
-          Admin
+    <aside className="app-sidebar">
+      <div className="app-sidebar-logo">
+        <span className="app-sidebar-logo-mark">SS</span>
+        <span className="app-sidebar-logo-text">Stock Screener</span>
+      </div>
+
+      <nav className="app-sidebar-nav">
+        <div className="app-sidebar-group">
+          <div className="app-sidebar-group-label">Screening</div>
+          <NavLink to="/" end className={sidebarLinkClass}>
+            <i className="bi bi-funnel" />
+            <span>Screener</span>
+          </NavLink>
+          <NavLink to="/filters" className={sidebarLinkClass}>
+            <i className="bi bi-sliders" />
+            <span>Advanced Filters</span>
+          </NavLink>
+          <NavLink to="/saved" className={sidebarLinkClass}>
+            <i className="bi bi-bookmark" />
+            <span>Saved Screens</span>
+          </NavLink>
+        </div>
+
+        <div className="app-sidebar-group">
+          <div className="app-sidebar-group-label">Portfolio</div>
+          <NavLink to="/dashboard" className={sidebarLinkClass}>
+            <i className="bi bi-speedometer2" />
+            <span>Dashboard</span>
+          </NavLink>
+          <NavLink to="/watchlist" className={sidebarLinkClass}>
+            <i className="bi bi-eye" />
+            <span>Watchlist</span>
+          </NavLink>
+        </div>
+
+        {user?.isAdmin && (
+          <div className="app-sidebar-group">
+            <div className="app-sidebar-group-label">Admin</div>
+            <NavLink to="/admin" className={sidebarLinkClass}>
+              <i className="bi bi-shield-lock" />
+              <span>Admin</span>
+            </NavLink>
+          </div>
+        )}
+      </nav>
+    </aside>
+  );
+}
+
+/**
+ * Top bar - sits above the routed page content, right-aligned account menu
+ * (mirrors the top-right avatar + dropdown pattern from the reference
+ * design). The dropdown only shows real account info/actions (name, email,
+ * an Active/Admin status badge, Log out) - no placeholder rows for features
+ * like Currency/Language/Dark Theme that don't exist in this app yet.
+ */
+function TopBar() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  function handleLogout() {
+    logout();
+    navigate("/login");
+  }
+
+  const initials = user?.name
+    ? user.name
+        .trim()
+        .split(/\s+/)
+        .map((part) => part[0])
+        .slice(0, 2)
+        .join("")
+        .toUpperCase()
+    : "?";
+
+  return (
+    <header className="app-topbar">
+      {user ? (
+        <div className="user-menu">
+          <button type="button" className="user-menu-trigger">
+            <span className="user-menu-avatar">{initials}</span>
+            <i className="bi bi-chevron-down" />
+          </button>
+          <div className="user-menu-dropdown">
+            <div className="user-menu-header">
+              <span className="user-menu-avatar-lg">{initials}</span>
+              <div style={{ minWidth: 0 }}>
+                <div className="user-menu-name-row">
+                  <span className="user-menu-name">{user.name}</span>
+                  {user.isAdmin ? (
+                    <span className="user-menu-badge admin">Admin</span>
+                  ) : user.isActive ? (
+                    <span className="user-menu-badge active">Active</span>
+                  ) : null}
+                </div>
+                <div className="user-menu-email">{user.email}</div>
+              </div>
+            </div>
+            <div className="user-menu-divider" />
+            <button type="button" onClick={handleLogout} className="user-menu-logout">
+              <i className="bi bi-box-arrow-right" />
+              Log out
+            </button>
+          </div>
+        </div>
+      ) : (
+        <NavLink to="/login" className="app-topbar-login">
+          <i className="bi bi-box-arrow-in-right" />
+          <span>Log in</span>
         </NavLink>
       )}
-      <NavLink to="/login" style={{ color: "#fff", marginLeft: "auto" }}>
-        {user ? `Account (${user.name})` : "Login"}
-      </NavLink>
-    </nav>
+    </header>
   );
 }
 
@@ -97,73 +181,84 @@ function AppLayout() {
   const { pathname } = useLocation();
   const isAuthScreen = pathname === "/login" && !user;
   const isActivateScreen = pathname === "/activate";
+  const showSidebar = !isAuthScreen && !isActivateScreen;
+
+  const routes = (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/activate" element={<Activate />} />
+      <Route
+        path="/"
+        element={
+          <RequireActive>
+            <Screener />
+          </RequireActive>
+        }
+      />
+      <Route
+        path="/filters"
+        element={
+          <RequireActive>
+            <AdvancedFilters />
+          </RequireActive>
+        }
+      />
+      <Route
+        path="/saved"
+        element={
+          <RequireActive>
+            <SavedScreens />
+          </RequireActive>
+        }
+      />
+      <Route
+        path="/dashboard"
+        element={
+          <RequireActive>
+            <Dashboard />
+          </RequireActive>
+        }
+      />
+      <Route
+        path="/stock/:exchangeCode/:stockCode"
+        element={
+          <RequireActive>
+            <StockDetail />
+          </RequireActive>
+        }
+      />
+      <Route
+        path="/watchlist"
+        element={
+          <RequireActive>
+            <Watchlist />
+          </RequireActive>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <RequireAdmin>
+            <Admin />
+          </RequireAdmin>
+        }
+      />
+    </Routes>
+  );
+
+  if (!showSidebar) {
+    // Login (logged-out) and Activate render full-bleed with no sidebar,
+    // same as before - they have their own dark-page layout.
+    return <main>{routes}</main>;
+  }
 
   return (
-    <div style={{ minHeight: "100vh" }}>
-      {!isAuthScreen && !isActivateScreen && <NavBar />}
-
-      <main style={isAuthScreen || isActivateScreen ? undefined : { padding: 24 }}>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/activate" element={<Activate />} />
-          <Route
-            path="/"
-            element={
-              <RequireActive>
-                <Screener />
-              </RequireActive>
-            }
-          />
-          <Route
-            path="/filters"
-            element={
-              <RequireActive>
-                <AdvancedFilters />
-              </RequireActive>
-            }
-          />
-          <Route
-            path="/saved"
-            element={
-              <RequireActive>
-                <SavedScreens />
-              </RequireActive>
-            }
-          />
-          <Route
-            path="/dashboard"
-            element={
-              <RequireActive>
-                <Dashboard />
-              </RequireActive>
-            }
-          />
-          <Route
-            path="/stock/:exchangeCode/:stockCode"
-            element={
-              <RequireActive>
-                <StockDetail />
-              </RequireActive>
-            }
-          />
-          <Route
-            path="/watchlist"
-            element={
-              <RequireActive>
-                <Watchlist />
-              </RequireActive>
-            }
-          />
-          <Route
-            path="/admin"
-            element={
-              <RequireAdmin>
-                <Admin />
-              </RequireAdmin>
-            }
-          />
-        </Routes>
-      </main>
+    <div className="app-shell">
+      <Sidebar />
+      <div className="app-content">
+        <TopBar />
+        <main className="app-main">{routes}</main>
+      </div>
     </div>
   );
 }
