@@ -2,21 +2,21 @@
 --
 -- Adds `is_admin` to `users` for databases that already existed before this
 -- feature. Run once:
---   mysql -u stockpicker -p stockpicker < server/src/db/migrations/002_add_admin_flag.sql
+--   mysql -u <user> -p <your DB_NAME> < server/src/db/migrations/002_add_admin_flag.sql
 -- (or paste into a MySQL Workbench SQL tab if `mysql` isn't on your PATH)
 --
 -- Safe to run even on a fresh database - schema.sql already has this column,
--- so the guard below makes this a no-op in that case.
-
-USE stockpicker;
+-- so the guard below makes this a no-op in that case. Uses DATABASE()
+-- rather than a hardcoded name since migrate.js connects with DB_NAME
+-- selected dynamically - matters for managed hosts like Aiven.
 
 SET @col_exists = (
   SELECT COUNT(*) FROM information_schema.COLUMNS
-  WHERE TABLE_SCHEMA = 'stockpicker' AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_admin'
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_admin'
 );
 SET @sql = IF(@col_exists = 0,
   'ALTER TABLE users ADD COLUMN is_admin TINYINT(1) NOT NULL DEFAULT 0 AFTER activated_at',
-  'SELECT "is_admin already exists, skipping"'
+  'SELECT ''is_admin already exists, skipping'''
 );
 PREPARE stmt FROM @sql;
 EXECUTE stmt;

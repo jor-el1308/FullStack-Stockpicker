@@ -1,5 +1,6 @@
 import mysql from "mysql2/promise";
 import "dotenv/config";
+import { getDbConnectionOptions } from "./dbEnv.js";
 
 /**
  * MySQL connection pool.
@@ -7,12 +8,15 @@ import "dotenv/config";
  *
  * All queries elsewhere in the app should go through this pool rather than
  * opening their own connections, so pooling/limits stay centralized.
+ *
+ * Connection host/port/user/password/TLS come from getDbConnectionOptions()
+ * (server/src/config/dbEnv.js) - same options the migrate/seed/wait-for-db
+ * scripts use, so pointing everything at an external shared database (e.g.
+ * Aiven's free MySQL tier) just means setting DB_HOST/DB_SSL/etc in .env,
+ * no code changes needed.
  */
 export const pool = mysql.createPool({
-  host: process.env.DB_HOST ?? "localhost",
-  port: Number(process.env.DB_PORT ?? 3306),
-  user: process.env.DB_USER ?? "stockpicker",
-  password: process.env.DB_PASSWORD ?? "",
+  ...getDbConnectionOptions(),
   database: process.env.DB_NAME ?? "stockpicker",
   waitForConnections: true,
   connectionLimit: 10,

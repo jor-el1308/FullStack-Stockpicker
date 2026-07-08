@@ -19,6 +19,11 @@ DB_USER = os.getenv("DB_USER", "stockpicker")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_NAME = os.getenv("DB_NAME", "stockpicker")
 
+# Shared team database (optional) - same DB_SSL/DB_SSL_CA pattern as
+# server/.env, for external managed hosts like Aiven that require TLS.
+DB_SSL = os.getenv("DB_SSL", "false").lower() == "true"
+DB_SSL_CA = os.getenv("DB_SSL_CA", "")
+
 # yfinance history period string: "1y", "2y", "5y", "max", etc.
 PRICE_HISTORY_PERIOD = os.getenv("PRICE_HISTORY_PERIOD", "2y")
 

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import mysql from "mysql2/promise";
 import "dotenv/config";
+import { getDbConnectionOptions } from "../src/config/dbEnv.js";
 
 /**
  * Loads server/src/db/seed.sql sample data. Usage: npm run db:seed --workspace=server
@@ -13,10 +14,7 @@ async function main() {
   const sql = readFileSync(seedPath, "utf-8");
 
   const connection = await mysql.createConnection({
-    host: process.env.DB_HOST ?? "localhost",
-    port: Number(process.env.DB_PORT ?? 3306),
-    user: process.env.DB_USER ?? "stockpicker",
-    password: process.env.DB_PASSWORD ?? "",
+    ...getDbConnectionOptions(),
     database: process.env.DB_NAME ?? "stockpicker",
     multipleStatements: true,
   });
