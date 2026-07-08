@@ -24,6 +24,18 @@ export const pool = mysql.createPool({
   dateStrings: true,
 });
 
+// Without this listener, an idle pooled connection getting closed by the
+// remote server (e.g. Aiven closing idle connections, or a network blip)
+// fires an unhandled "error" event on the pool - which Node treats as an
+// uncaught exception and crashes the whole process mid-request. That looks
+// like ECONNRESET on the client/proxy side and an empty response body
+// ("Unexpected end of JSON input" trying to parse it). Logging it here
+// instead keeps the server alive; the next query just gets a fresh
+// connection from the pool.
+pool.on("error", (err) => {
+  console.error("[db] pool error (connection dropped, will reconnect on next query):", err.message);
+});
+
 /**
  * @returns {Promise<boolean>}
  */

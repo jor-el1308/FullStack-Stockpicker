@@ -57,9 +57,18 @@ admins, per-user payment history, summary stats) - see
 admin; see `server/src/db/migrations/002_add_admin_flag.sql` for how to
 bootstrap the first admin account.
 
+**Login 2FA note (done):** signup now requires the password twice
+(confirm-password field, checked client-side) and login is two-stage - after
+a correct password, a 6-digit code is emailed to that address
+(`server/src/utils/mailer.js`) and must be entered before a real session
+token is issued. If SMTP isn't configured, the code is printed to the server
+log instead so login still works during local dev. See
+`server/src/services/auth.service.js` (`issuePreAuthToken` /
+`verifyLoginOtp`) and `server/src/db/migrations/003_add_login_otp.sql`.
+
 **Ideas / not yet built:**
-- Light/dark mode toggle (a settings dropdown - theme switch, logout, etc.)
-- Left-side nav bar instead of the current top nav
+- Light/dark mode toggle (the account menu dropdown with logout already
+  exists in the top bar - just the actual theme-switching isn't built)
 - Login through identity providers (optional / stretch)
 
 ## Run with Docker (fastest way to get it running)
@@ -157,6 +166,12 @@ class project's shared dev/demo database it's a solid fit.
    `DB_HOST`/`DB_SSL` comments in `docker-compose.yml` if you want the
    details on how that's wired through.)
 
+   Running the Python ingestion pipeline (below) against the same shared
+   database needs the same `DB_SSL`/`DB_SSL_CA` values in `ingestion/.env`
+   too - see step 5. The CA path there is relative to `ingestion/`, not
+   `server/`, so it's `../server/aiven-ca.pem` instead of just
+   `aiven-ca.pem`.
+
 5. **Run migrations against it once:**
    ```
    npm run db:migrate --workspace=server
@@ -240,6 +255,9 @@ schema or app code depends on where MySQL is hosted.
    python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
    pip install -r requirements.txt
    cp .env.example .env   # same DB credentials as server/.env
+   # if using the shared Aiven database, also set DB_SSL=true and
+   # DB_SSL_CA=../server/aiven-ca.pem in this .env (see "Shared team
+   # database" above)
    python ingest.py
    ```
    See `ingestion/README.md` for the default stock list and known data
