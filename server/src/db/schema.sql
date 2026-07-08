@@ -5,12 +5,14 @@
 -- lookup table), and the auth/watchlist tables needed by Persons 1 and 5.
 --
 -- Run with:  npm run db:migrate --workspace=server
--- (or manually: mysql -u <user> -p stockpicker < server/src/db/schema.sql)
-
-CREATE DATABASE IF NOT EXISTS stockpicker
-  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-USE stockpicker;
+-- (or manually: mysql -u <user> -p <your DB_NAME> < server/src/db/schema.sql)
+--
+-- This file assumes a database has already been selected (migrate.js does
+-- this dynamically based on the DB_NAME env var - it creates the database
+-- first if missing, then connects with it selected, so nothing in this
+-- file hardcodes a database name; that matters for managed hosts like
+-- Aiven where the database already exists under a fixed name such as
+-- `defaultdb`, not `stockpicker`).
 
 -- ---------------------------------------------------------------------
 -- Reference data

@@ -7,8 +7,8 @@
 --   * NEWCO        -> listed < 5 years ago (company-age exclusion)
 --   * LOSSY        -> negative earnings (negative P/E)
 -- Run with: npm run db:seed --workspace=server
-
-USE stockpicker;
+-- (seed.js already connects with the right database selected via DB_NAME -
+-- no hardcoded USE statement needed here.)
 
 INSERT IGNORE INTO exchange (exchange_code, exchange_name, country, currency) VALUES
   ('SGX', 'Singapore Exchange', 'Singapore', 'SGD'),
