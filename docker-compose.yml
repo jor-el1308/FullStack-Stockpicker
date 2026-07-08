@@ -54,8 +54,6 @@ services:
       DB_SSL_CA: ${DB_SSL_CA:-}
       JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
       JWT_EXPIRES_IN: 7d
-      STOCK_DATA_PROVIDER: ${STOCK_DATA_PROVIDER:-alpha_vantage}
-      ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       # Welcome email + login 2FA codes (server/src/utils/mailer.js). Leave
       # blank and the app still runs - sending is skipped (login codes get
