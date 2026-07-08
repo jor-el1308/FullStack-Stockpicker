@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { pool } from "../config/db.js";
 
 /**
@@ -16,9 +16,19 @@ import { pool } from "../config/db.js";
  * should see the Admin nav link. New users default to is_active = 0 and
  * is_admin = 0 at the DB level (see schema.sql) - createUser() doesn't need
  * to set either.
+ *
+ * NOTE for Person 1 (added by Person 2 for login 2FA - please review): login
+ * is now two steps. issueToken()/verifyPassword() are unchanged, but
+ * auth.controller.js's login() no longer calls issueToken() directly on a
+ * password match - it emails a one-time code (createLoginOtp() below) and
+ * hands back a short-lived issuePreAuthToken() instead. The real session
+ * token only gets issued from the new POST /auth/verify-otp once
+ * verifyLoginOtp() confirms the code. See server/src/db/schema.sql's new
+ * `login_otp` table.
  */
 
 const SALT_ROUNDS = 10;
+const OTP_EXPIRY_MINUTES = 10;
 
 /**
  * @param {string} password
@@ -42,6 +52,82 @@ export function issueToken(user) {
   const secret = process.env.JWT_SECRET ?? "dev-secret";
   const expiresIn = process.env.JWT_EXPIRES_IN ?? "7d";
   return jwt.sign({ userId: user.id }, secret, { expiresIn });
+}
+
+/**
+ * Login 2FA (Person 1's auth flow, added by Person 2). Short-lived token
+ * binding a login-OTP session to a specific user, handed to the client
+ * after step 1 (email+password) and required - alongside the emailed code -
+ * to complete step 2 (POST /auth/verify-otp). Deliberately a different
+ * shape than issueToken()'s real session JWT: requireAuth only accepts
+ * tokens without a `purpose` claim, so this one can't be used to call any
+ * authenticated route - it only proves "step 1 already passed" for this
+ * specific login attempt.
+ * @param {{ id: string }} user
+ */
+export function issuePreAuthToken(user) {
+  const secret = process.env.JWT_SECRET ?? "dev-secret";
+  return jwt.sign({ userId: user.id, purpose: "login-otp" }, secret, { expiresIn: `${OTP_EXPIRY_MINUTES}m` });
+}
+
+/**
+ * @param {string} token
+ * @returns {string} userId
+ */
+export function verifyPreAuthToken(token) {
+  const secret = process.env.JWT_SECRET ?? "dev-secret";
+  const payload = jwt.verify(token, secret);
+  if (payload.purpose !== "login-otp") {
+    throw new Error("Invalid verification token");
+  }
+  return payload.userId;
+}
+
+/**
+ * Generates a 6-digit one-time code, stores only its bcrypt hash (never the
+ * raw code) with a 10-minute expiry, and invalidates any still-unused codes
+ * for this user first so only the most recently sent code can ever be
+ * accepted.
+ * @param {string} userId
+ * @returns {Promise<string>} the raw 6-digit code, to be emailed immediately - never persisted in plaintext
+ */
+export async function createLoginOtp(userId) {
+  const code = String(randomInt(100000, 1000000));
+  const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
+
+  await pool.query(`DELETE FROM login_otp WHERE user_id = ? AND consumed_at IS NULL`, [userId]);
+  await pool.query(
+    `INSERT INTO login_otp (id, user_id, code_hash, expires_at)
+     VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
+    [randomUUID(), userId, codeHash, OTP_EXPIRY_MINUTES]
+  );
+
+  return code;
+}
+
+/**
+ * Checks a submitted code against the most recent unconsumed, unexpired
+ * code for this user, and marks it consumed on a match so it can't be
+ * replayed.
+ * @param {string} userId
+ * @param {string} code
+ * @returns {Promise<boolean>}
+ */
+export async function verifyLoginOtp(userId, code) {
+  const [rows] = await pool.query(
+    `SELECT id, code_hash AS codeHash FROM login_otp
+     WHERE user_id = ? AND consumed_at IS NULL AND expires_at > NOW()
+     ORDER BY created_at DESC LIMIT 1`,
+    [userId]
+  );
+  const otp = rows[0];
+  if (!otp) return false;
+
+  const matches = await bcrypt.compare(code, otp.codeHash);
+  if (!matches) return false;
+
+  await pool.query(`UPDATE login_otp SET consumed_at = NOW() WHERE id = ?`, [otp.id]);
+  return true;
 }
 
 /**

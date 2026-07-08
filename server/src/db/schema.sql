@@ -133,6 +133,21 @@ CREATE TABLE IF NOT EXISTS payment (
     REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- Owner: Person 2 (Charles) - added for login 2FA on top of Person 1's auth
+-- flow. One row per emailed one-time code (see server/src/services/
+-- auth.service.js). Codes are stored hashed (bcrypt), never in plaintext -
+-- same pattern as users.password_hash.
+CREATE TABLE IF NOT EXISTS login_otp (
+  id           CHAR(36) PRIMARY KEY DEFAULT (UUID()),
+  user_id      CHAR(36) NOT NULL,
+  code_hash    VARCHAR(255) NOT NULL,
+  expires_at   TIMESTAMP NOT NULL,
+  consumed_at  TIMESTAMP NULL DEFAULT NULL,
+  created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_login_otp_user FOREIGN KEY (user_id)
+    REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS saved_criteria_set (
   id         CHAR(36) PRIMARY KEY DEFAULT (UUID()),
   user_id    CHAR(36) NOT NULL,
