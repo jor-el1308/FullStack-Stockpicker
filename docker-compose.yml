@@ -8,7 +8,13 @@ services:
       MYSQL_USER: ${DB_USER:-stockpicker}
       MYSQL_PASSWORD: ${DB_PASSWORD:-changeme}
     ports:
-      - "3306:3306"
+      # Host port 3307, not 3306 - avoids clashing with a MySQL already
+      # running natively on your machine (e.g. from the manual/non-Docker
+      # setup path). Only matters if you want to connect from a host tool
+      # like MySQL Workbench (localhost:3307) - the app itself talks to
+      # this container over the internal Docker network on port 3306
+      # regardless (see DB_HOST/DB_PORT under the server service below).
+      - "3307:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
@@ -41,6 +47,15 @@ services:
       STOCK_DATA_PROVIDER: ${STOCK_DATA_PROVIDER:-alpha_vantage}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      # Welcome email + login 2FA codes (server/src/utils/mailer.js). Leave
+      # blank and the app still runs - sending is skipped (login codes get
+      # logged to `docker-compose logs server` instead) until these are set
+      # in a root .env. See .env.example.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
       # Set to "false" to skip the auto-seed on every container start (e.g.
       # once you've loaded real data via the ingestion pipeline).
       AUTO_SEED: ${AUTO_SEED:-true}
