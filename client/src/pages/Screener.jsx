@@ -7,12 +7,15 @@
  */
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { SlidersHorizontal, Play, Bookmark, RefreshCw } from "lucide-react";
+import { SlidersHorizontal, Play, Bookmark, RefreshCw, Sparkles, X } from "lucide-react";
 import ResultsTable from "../components/ResultsTable";
 import { useScreener } from "../context/ScreenerContext";
 import { useAuth } from "../context/AuthContext";
 import { saveScreen } from "../api/stocks";
+import { analyzeStocks } from "../api/ai";
 import { describeRange } from "../screener/criteria";
+
+const MAX_AI_SELECTION = 10;
 
 const LOCAL_SCREENS_KEY = "localSavedScreens";
 
@@ -36,6 +39,45 @@ export default function Screener() {
   const [screenName, setScreenName] = useState("");
   const [saveMsg, setSaveMsg] = useState(null);
 
+  // AI recommendation (Person 1, requirement doc section 6) - user
+  // shortlists rows from the results table, then sends them off for
+  // qualitative analysis.
+  const [selectedKeys, setSelectedKeys] = useState(new Set());
+  const [selectedRows, setSelectedRows] = useState([]);
+  const [analysis, setAnalysis] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState(null);
+
+  function toggleRow(row) {
+    const key = `${row.exchangeCode}-${row.stockCode}`;
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+        setSelectedRows((rows) => rows.filter((r) => `${r.exchangeCode}-${r.stockCode}` !== key));
+      } else {
+        if (next.size >= MAX_AI_SELECTION) return prev; // cap shortlist size
+        next.add(key);
+        setSelectedRows((rows) => [...rows, row]);
+      }
+      return next;
+    });
+  }
+
+  async function handleAnalyze() {
+    setAnalyzing(true);
+    setAnalyzeError(null);
+    setAnalysis(null);
+    try {
+      const { analysis } = await analyzeStocks(selectedRows);
+      setAnalysis(analysis);
+    } catch (err) {
+      setAnalyzeError(err.message);
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
   const activeCriteria = criteria.filter(
     (c) => (c.min != null && c.min !== "") || (c.max != null && c.max !== "")
   );
@@ -46,6 +88,13 @@ export default function Screener() {
   useEffect(() => {
     if (user && criteriaReady && results === null && !loading && !error) runScreen();
   }, [user, criteriaReady, results, loading, error, runScreen]);
+
+  useEffect(() => {
+    setSelectedKeys(new Set());
+    setSelectedRows([]);
+    setAnalysis(null);
+    setAnalyzeError(null);
+  }, [results]);
 
   async function handleSave(e) {
     e.preventDefault();
@@ -108,6 +157,15 @@ export default function Screener() {
           <button className="btn btn-primary" onClick={() => runScreen()} disabled={loading || !criteriaReady}>
             <Play size={14} />
             {loading ? "Running…" : "Run Screen"}
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={handleAnalyze}
+            disabled={selectedRows.length === 0 || analyzing}
+            title={selectedRows.length === 0 ? "Select rows in the results table first" : undefined}
+          >
+            <Sparkles size={14} />
+            {analyzing ? "Analyzing…" : `Analyze with AI${selectedRows.length ? ` (${selectedRows.length})` : ""}`}
           </button>
         </div>
       </div>
@@ -204,6 +262,12 @@ export default function Screener() {
             {lastRunAt ? `Last run ${lastRunAt.toLocaleTimeString()}` : "Not run yet"}
           </span>
         </div>
+        {results && results.length > 0 && (
+          <p className="page-subtitle" style={{ padding: "10px 16px 0" }}>
+            Tick rows to shortlist up to {MAX_AI_SELECTION} stocks, then click "Analyze with AI" above for a
+            qualitative take on each.
+          </p>
+        )}
         <div style={{ overflowX: "auto", padding: "0 8px 8px" }}>
           {loading && !results ? (
             <p className="page-subtitle" style={{ padding: 18 }}>
@@ -213,6 +277,9 @@ export default function Screener() {
             <ResultsTable
               rows={results ?? []}
               onRowClick={(row) => navigate(`/stock/${row.exchangeCode}/${row.stockCode}`)}
+              selectable
+              selectedKeys={selectedKeys}
+              onToggleRow={toggleRow}
               emptyMessage={
                 error
                   ? "No results — the screener API is unavailable."
@@ -222,6 +289,64 @@ export default function Screener() {
           )}
         </div>
       </div>
+
+      {(analyzing || analysis || analyzeError) && (
+        <div className="card card-pad" style={{ marginTop: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <span
+              style={{
+                fontFamily: "var(--font-title)",
+                fontWeight: 600,
+                fontSize: 14,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Sparkles size={14} color="var(--color-special)" />
+              AI Analysis
+            </span>
+            <button
+              className="btn btn-secondary"
+              onClick={() => {
+                setAnalysis(null);
+                setAnalyzeError(null);
+              }}
+              style={{ padding: "4px 8px" }}
+              aria-label="Close AI analysis"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          {analyzing && (
+            <p className="page-subtitle" style={{ marginTop: 12 }}>
+              Asking the AI model about {selectedRows.length} stock{selectedRows.length === 1 ? "" : "s"}…
+            </p>
+          )}
+
+          {analyzeError && (
+            <div className="notice notice-error" style={{ marginTop: 12 }}>
+              Couldn't get AI analysis: {analyzeError}
+            </div>
+          )}
+
+          {analysis && (
+            <div
+              style={{
+                marginTop: 12,
+                fontFamily: "var(--font-body)",
+                fontSize: 14,
+                lineHeight: 1.6,
+                color: "var(--color-dark-menu)",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {analysis}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }
