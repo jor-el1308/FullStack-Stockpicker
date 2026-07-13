@@ -19,10 +19,10 @@ export async function start (req, res) {
 
     const config = await oauthService.getConfig(provider);
     const codeVerifier = client.randomPKCECodeVerifier();
-    const codeChallenge = await client.calculatePCKECodeChallenge(codeVerifier);
+    const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
     const state = client.randomState();
 
-    res.cookie("oauth_pcke", codeVerifier, COOKIE_OPTS);
+    res.cookie("oauth_pkce", codeVerifier, COOKIE_OPTS);
     res.cookie("oauth_state", state, COOKIE_OPTS);
 
     const url = client.buildAuthorizationUrl (config, {
@@ -66,7 +66,7 @@ export async function callback(req, res) {
             const existingUser = await authService.findUserByEmail(claims.email);
             userId = existingUser ? existingUser.id : randomUUID();
             if (!existingUser) {
-                await pool.query(`INSER INTO users (id, email, name) VALUES (?, ?, ?)`, [
+                await pool.query(`INSERT INTO users (id, email, name) VALUES (?, ?, ?)`, [
                     userId,
                     claims.email,
                     claims.name ?? claims.email,
@@ -78,9 +78,9 @@ export async function callback(req, res) {
             );
         }
 
-        const user = await authService.findUserByID(userId);
+        const user = await authService.findUserById(userId);
         const token = authService.issueToken(user);
-        res.redirect(`${process.env.SERVER_ORIGIN}/oauth-callback?token=${token}`);
+        res.redirect(`${process.env.CLIENT_ORIGIN}/oauth-callback?token=${token}`);
     } catch (err) {
         console.error(`[oauth: ${provider}] callback failed:`, err.message);
         res.redirect(failUrl);

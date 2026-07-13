@@ -25,6 +25,5 @@ router.delete("/me/criteria-sets/:id", requireAuth, authController.deleteCriteri
 // OAuth Routes
 router.get("/oauth/:provider/start", oauthController.start);
 router.get("/oauth/:provider/callback", oauthController.callback);
-router.get("/me", requireAuth, authController.me);
 
 export default router;
