@@ -5,7 +5,7 @@
  * Fine-grained editing lives on the Advanced Filters page; screens can be
  * stored/recalled on the Saved Screens page.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { SlidersHorizontal, Play, Bookmark, RefreshCw, Sparkles, X } from "lucide-react";
 import ResultsTable from "../components/ResultsTable";
@@ -43,10 +43,14 @@ export default function Screener() {
   // shortlists rows from the results table, then sends them off for
   // qualitative analysis.
   const [selectedKeys, setSelectedKeys] = useState(new Set());
-  const [selectedRows, setSelectedRows] = useState([]);
   const [analysis, setAnalysis] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState(null);
+
+  const selectedRows = useMemo(
+    () => (results ?? []).filter((r) => selectedKeys.has(`${r.exchangeCode}-${r.stockCode}`)),
+    [results, selectedKeys]
+  );
 
   function toggleRow(row) {
     const key = `${row.exchangeCode}-${row.stockCode}`;
@@ -54,11 +58,9 @@ export default function Screener() {
       const next = new Set(prev);
       if (next.has(key)) {
         next.delete(key);
-        setSelectedRows((rows) => rows.filter((r) => `${r.exchangeCode}-${r.stockCode}` !== key));
       } else {
         if (next.size >= MAX_AI_SELECTION) return prev; // cap shortlist size
         next.add(key);
-        setSelectedRows((rows) => [...rows, row]);
       }
       return next;
     });
@@ -91,7 +93,6 @@ export default function Screener() {
 
   useEffect(() => {
     setSelectedKeys(new Set());
-    setSelectedRows([]);
     setAnalysis(null);
     setAnalyzeError(null);
   }, [results]);
