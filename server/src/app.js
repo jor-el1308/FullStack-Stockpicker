@@ -10,6 +10,7 @@ import stocksRoutes from "./routes/stocks.routes.js";
 import screenerRoutes from "./routes/screener.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import notificationsRoutes from "./routes/notifications.routes.js";
+import aiRoutes from "./routes/ai.routes.js";
 
 export function createApp() {
   const app = express();
@@ -30,6 +31,7 @@ export function createApp() {
   app.use("/api/screener", screenerRoutes); // Person 3 - gated by requireAuth + requireActiveAccount
   app.use("/api/dashboard", dashboardRoutes); // Person 4 - gated by requireAuth + requireActiveAccount
   app.use("/api/notifications", notificationsRoutes); // Person 5 - gated by requireAuth + requireActiveAccount
+  app.use("/api/ai", aiRoutes); // Person 1 - gated by requireAuth + requireActiveAccount
 
   // Fallback 404
   app.use((_req, res) => {
