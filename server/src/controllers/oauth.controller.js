@@ -2,7 +2,7 @@ import * as client from "openid-client";
 import { randomUUID } from "node:crypto";
 import * as oauthService from "../services/oauth.service.js";
 import * as authService from "../services/auth.service.js";
-import { pool } from "../db.js";
+import { pool } from "../config/db.js";
 
 const COOKIE_OPTS = {
     httpOnly: true,
