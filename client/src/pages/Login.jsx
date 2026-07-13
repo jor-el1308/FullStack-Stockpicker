@@ -212,6 +212,15 @@ function AuthForm({ onAuthenticated }) {
                   {submitting ? "Please wait..." : mode === "login" ? "Log In" : "Sign Up"}
                 </button>
               </form>
+
+              <div className="auth-dark-divider">or</div>
+              <a href="/api/auth/oauth/google/start" className="auth-dark-oauth-btn">
+                Continue with Google
+              </a>
+              <a href="/api/auth/oauth/microsoft/start" className="auth-dark-oauth-btn">
+                Continue with Microsoft
+              </a>
+
               <p className="auth-dark-footer">
                 {mode === "login" ? "Need an account? " : "Already have an account? "}
                 <button

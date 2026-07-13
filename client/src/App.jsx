@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import StockDetail from "./pages/StockDetail";
 import Watchlist from "./pages/Watchlist";
 import Admin from "./pages/Admin";
+import OAuthCallback from "./pages/OAuthCallback";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ScreenerProvider } from "./context/ScreenerContext";
 
@@ -181,12 +182,14 @@ function AppLayout() {
   const { pathname } = useLocation();
   const isAuthScreen = pathname === "/login" && !user;
   const isActivateScreen = pathname === "/activate";
-  const showSidebar = !isAuthScreen && !isActivateScreen;
+  const isOAuthCallbackScreen = pathname === "/oauth/callback";
+  const showSidebar = !isAuthScreen && !isActivateScreen && !isOAuthCallback;
 
   const routes = (
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/activate" element={<Activate />} />
+      <Route path="/oauth/callback" element={<OAuthCallback />} />
       <Route
         path="/"
         element={

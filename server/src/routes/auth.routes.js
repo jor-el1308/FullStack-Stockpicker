@@ -1,6 +1,7 @@
 import { Router } from "express";
 import * as authController from "../controllers/auth.controller.js";
 import { requireAuth } from "../middleware/auth.middleware.js";
+import * as oauthController from "../controllers/oauth.controller.js";
 
 /**
  * Owner: Person 1 (Yong Wee) - Auth & User Management.
@@ -20,5 +21,10 @@ router.get("/me", requireAuth, authController.getProfile);
 router.get("/me/criteria-sets", requireAuth, authController.listCriteriaSets);
 router.post("/me/criteria-sets", requireAuth, authController.saveCriteriaSet);
 router.delete("/me/criteria-sets/:id", requireAuth, authController.deleteCriteriaSet);
+
+// OAuth Routes
+router.get("/oauth/:provider/start", oauthController.start);
+router.get("/oauth/:provider/callback", oauthController.callback);
+router.get("/me", requireAuth, authController.me);
 
 export default router;

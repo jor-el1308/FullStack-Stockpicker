@@ -386,6 +386,28 @@ a, button {
   text-decoration: underline;
 }
 
+.auth-dark-divider {
+  text-align: center;
+  color: var(--text-muted, #888);
+  font-size: 0.85rem;
+  margin: 0.75rem 0;
+}
+
+.auth-dark-oauth-btn {
+  display: block;
+  text-align: center;
+  padding: 0.65rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #333);
+  margin-bottom: 0.5rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.auth-dark-oauth-btn:hover {
+  background: var(--hover-bg, rgba(255,255,255,0.05));
+}
+
 /* ------------------------------------------------------------------ */
 /* Screener / Advanced Filters / Saved Screens (matches app style)     */
 /* ------------------------------------------------------------------ */

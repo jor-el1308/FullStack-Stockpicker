@@ -249,3 +249,8 @@ export async function deleteCriteriaSet(req, res) {
     res.status(500).json({ success: false, error: { message: err.message } });
   }
 }
+
+export async function me(req, res) {
+  const user = await authService.findUserById(req.user.id);
+  res.json({ success: true, data: toAuthUser(user) });
+}

@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import cookieParser from "cookie-parser";
 import "dotenv/config";
 
 import authRoutes from "./routes/auth.routes.js";
@@ -18,6 +19,7 @@ export function createApp() {
   app.use(helmet());
   app.use(cors({ origin: process.env.CLIENT_ORIGIN ?? "http://localhost:5173" }));
   app.use(express.json());
+  app.use(cookieParser(process.env.COOKIE_SECRET));
 
   app.get("/api/health", (_req, res) => {
     res.json({ success: true, data: { status: "ok" } });

@@ -67,6 +67,14 @@ services:
       # Set to "false" to skip the auto-seed on every container start (e.g.
       # once you've loaded real data via the ingestion pipeline).
       AUTO_SEED: ${AUTO_SEED:-true}
+
+      # OAuth (Google / Microsoft) - see server/.env for the actual values
+      SERVER_ORIGIN: http://localhost:4000
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+      COOKIE_SECRET: ${COOKIE_SECRET:-change-this-in-production}
     ports:
       - "4000:4000"
     volumes:
