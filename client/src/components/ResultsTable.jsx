@@ -15,9 +15,22 @@ const DEFAULT_PAGE_SIZE = 15;
  * server just to change page) - defaults to 15 rows/page, resets back to
  * page 1 whenever the `rows` prop changes (e.g. a new screen is run).
  *
- * @param {{ rows: import("../../../shared/types/index.js").ScreenerResultRow[], onRowClick?: (row) => void, emptyMessage?: string, pageSize?: number }} props
+ * Optional selection (checkboxes) support - used by the Screener page to let
+ * users shortlist rows for AI analysis (Person 1, requirement doc section 6).
+ * Off by default (no `selectable` prop) so Dashboard's read-only usage is
+ * unaffected.
+ *
+ * @param {{ rows: import("../../../shared/types/index.js").ScreenerResultRow[], onRowClick?: (row) => void, emptyMessage?: string, pageSize?: number, selectable?: boolean, selectedKeys?: Set<string>, onToggleRow?: (row) => void }} props
  */
-export default function ResultsTable({ rows, onRowClick, emptyMessage, pageSize = DEFAULT_PAGE_SIZE }) {
+export default function ResultsTable({
+  rows,
+  onRowClick,
+  emptyMessage,
+  pageSize = DEFAULT_PAGE_SIZE,
+  selectable = false,
+  selectedKeys,
+  onToggleRow,
+}) {
   const [page, setPage] = useState(1);
 
   useEffect(() => {
@@ -45,6 +58,7 @@ export default function ResultsTable({ rows, onRowClick, emptyMessage, pageSize 
       <table className="results-table">
         <thead>
           <tr>
+            {selectable && <th style={{ width: 32 }} />}
             <th>Exchange</th>
             <th>Stock Code</th>
             <th>Stock Name</th>
@@ -57,34 +71,47 @@ export default function ResultsTable({ rows, onRowClick, emptyMessage, pageSize 
           </tr>
         </thead>
         <tbody>
-          {pageRows.map((row) => (
-            <tr
-              key={`${row.exchangeCode}-${row.stockCode}`}
-              onClick={() => onRowClick?.(row)}
-              style={{ cursor: onRowClick ? "pointer" : "default" }}
-            >
-              <td>{row.exchangeCode}</td>
-              <td className="numeric">{row.stockCode}</td>
-              <td>{row.stockName}</td>
-              {criteriaKeys.map((key) => {
-                const value = row.values[key];
-                return (
-                  <td
-                    key={key}
-                    className="numeric"
-                    style={{ color: value != null && value < 0 ? colors.badNumber : colors.goodNumber }}
-                  >
-                    {formatValue(key, value)}
+          {pageRows.map((row) => {
+            const rowKey = `${row.exchangeCode}-${row.stockCode}`;
+            return (
+              <tr
+                key={rowKey}
+                onClick={() => onRowClick?.(row)}
+                style={{ cursor: onRowClick ? "pointer" : "default" }}
+              >
+                {selectable && (
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedKeys?.has(rowKey) ?? false}
+                      onChange={() => onToggleRow?.(row)}
+                      aria-label={`Select ${row.stockName}`}
+                    />
                   </td>
-                );
-              })}
-              {hasScore && (
-                <td className="numeric" style={{ color: colors.special }}>
-                  {row.score != null ? row.score : "—"}
-                </td>
-              )}
-            </tr>
-          ))}
+                )}
+                <td>{row.exchangeCode}</td>
+                <td className="numeric">{row.stockCode}</td>
+                <td>{row.stockName}</td>
+                {criteriaKeys.map((key) => {
+                  const value = row.values[key];
+                  return (
+                    <td
+                      key={key}
+                      className="numeric"
+                      style={{ color: value != null && value < 0 ? colors.badNumber : colors.goodNumber }}
+                    >
+                      {formatValue(key, value)}
+                    </td>
+                  );
+                })}
+                {hasScore && (
+                  <td className="numeric" style={{ color: colors.special }}>
+                    {row.score != null ? row.score : "—"}
+                  </td>
+                )}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
 
@@ -145,3 +172,4 @@ function pagerButtonStyle(disabled) {
     opacity: disabled ? 0.5 : 1,
   };
 }
+
