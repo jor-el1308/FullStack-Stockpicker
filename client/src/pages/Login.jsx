@@ -215,9 +215,11 @@ function AuthForm({ onAuthenticated }) {
 
               <div className="auth-dark-divider">or</div>
               <a href="/api/auth/oauth/google/start" className="auth-dark-oauth-btn">
+                <GoogleIcon />
                 Continue with Google
               </a>
               <a href="/api/auth/oauth/microsoft/start" className="auth-dark-oauth-btn">
+                <MicrosoftIcon />
                 Continue with Microsoft
               </a>
 
@@ -280,6 +282,40 @@ function AuthForm({ onAuthenticated }) {
         </div>
       </aside>
     </div>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg className="auth-dark-oauth-icon" viewBox="0 0 48 48" aria-hidden="true">
+      <path
+        fill="#FFC107"
+        d="M43.6 20.5H42V20.4H24v7.2h11.3C33.7 32 29.3 35 24 35c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.1-5.1C33.9 5.9 29.2 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"
+      />
+      <path
+        fill="#FF3D00"
+        d="M6.3 14.7l5.9 4.3C13.7 15.6 18.5 12 24 12c3.1 0 5.9 1.2 8 3.1l5.1-5.1C33.9 5.9 29.2 4 24 4c-7.4 0-13.8 4.2-17.7 10.7z"
+      />
+      <path
+        fill="#4CAF50"
+        d="M24 44c5.2 0 9.9-1.9 13.4-5.1l-6.2-5.2C29.3 35.6 26.8 36.5 24 36.5c-5.3 0-9.6-3.4-11.3-8.1l-6.1 4.7C10.1 39.7 16.5 44 24 44z"
+      />
+      <path
+        fill="#1976D2"
+        d="M43.6 20.5H42V20.4H24v7.2h11.3c-.8 2.3-2.3 4.3-4.2 5.7l6.2 5.2C40.8 35.6 44 30.4 44 24c0-1.3-.1-2.7-.4-3.5z"
+      />
+    </svg>
+  );
+}
+
+function MicrosoftIcon() {
+  return (
+    <svg className="auth-dark-oauth-icon" viewBox="0 0 23 23" aria-hidden="true">
+      <rect x="1" y="1" width="10" height="10" fill="#F25022" />
+      <rect x="12" y="1" width="10" height="10" fill="#7FBA00" />
+      <rect x="1" y="12" width="10" height="10" fill="#00A4EF" />
+      <rect x="12" y="12" width="10" height="10" fill="#FFB900" />
+    </svg>
   );
 }
 

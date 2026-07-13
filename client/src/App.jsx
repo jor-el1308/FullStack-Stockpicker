@@ -183,7 +183,7 @@ function AppLayout() {
   const isAuthScreen = pathname === "/login" && !user;
   const isActivateScreen = pathname === "/activate";
   const isOAuthCallbackScreen = pathname === "/oauth/callback";
-  const showSidebar = !isAuthScreen && !isActivateScreen && !isOAuthCallback;
+  const showSidebar = !isAuthScreen && !isActivateScreen && !isOAuthCallbackScreen;
 
   const routes = (
     <Routes>
