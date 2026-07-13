@@ -50,8 +50,39 @@ For EACH stock below, give a short qualitative take covering:
 
 Keep each stock's write-up to 3-4 sentences. End with a one-line disclaimer that this is not financial advice.
 
+Respond in plain text only, no markdown or HTML. Do not use asterisks, underscores, backticks, or "#" headers for formatting. Use a stock's name followed by a colon to start each write-up, and a plain line breaks between stocks.
+
 Shortlisted stocks:
 ${list}`;
+}
+
+/**
+ * Safety net for when the model formats with markdown despite being asked
+ * not to (Gemini does this fairly often, e.g. **bold** metric names or
+ * "* " bullet lists). Strips the common markdown tokens while leaving the
+ * words themselves intact, since the client renders this as plain
+ * pre-wrapped text, not through a markdown renderer.
+ * @param {string} text
+ * @returns {string}
+ */
+
+function stripMarkdown(text) {
+    return text
+        // bold/italic: **text**, __text__, *text*, _text_ -> text
+        .replace(/\*\*(.+?)\*\*/g, "$1")
+        .replace(/__(.+?)__/g, "$1")
+        .replace(/\*(.+?)\*/g, "$1")
+        .replace(/_(.+?)_/g, "$1")
+        // inline code / code fences
+        .replace(/```/g, "")
+        .replace(/`(.+?)`/g, "$1")
+        // heading markers at line start: "# ", "## ", etc.
+        .replace(/^#{1,6}\s+/gm, "")
+        // bullet markers at line start: "* ", "- ", "+ "
+        .replace(/^[\s]*[*+-]\s+/gm, "")
+        // any leftover stray asterisks/underscores used as emphasis
+        .replace(/[*_]{1,3}/g, "")
+        .trim();
 }
 
 /**
@@ -71,5 +102,5 @@ export async function getQualitativeAnalysis(stocks) {
     if (!text) {
         throw new Error("AI provider returned an empty response");
     }
-    return text;
+    return stripMarkdown(text);
 }
