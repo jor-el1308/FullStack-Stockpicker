@@ -3,7 +3,7 @@
  * Fetches screener results and renders them via ResultsTable.
  * Clicking a row navigates to /stock/:exchangeCode/:stockCode (StockDetail.jsx).
  */
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fonts, fontWeights } from "../theme";
 import ResultsTable from "../components/ResultsTable";
@@ -18,10 +18,20 @@ export default function Dashboard() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    let cancelled = false;
     getStocks()
-      .then(setRows)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .then((data) => {
+        if (!cancelled) setRows(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (

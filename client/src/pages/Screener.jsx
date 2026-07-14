@@ -80,8 +80,12 @@ export default function Screener() {
     }
   }
 
+  // A criterion with only a weight set (no min/max) is still active - it's
+  // sent to the server (see ScreenerContext.jsx's buildRequest) to influence
+  // ranking rather than to filter rows, so it needs to show up here too and
+  // not get dropped when the screen is saved (see handleSave below).
   const activeCriteria = criteria.filter(
-    (c) => (c.min != null && c.min !== "") || (c.max != null && c.max !== "")
+    (c) => (c.min != null && c.min !== "") || (c.max != null && c.max !== "") || c.weight
   );
 
   // Run automatically once the default criteria have loaded (and after a
@@ -106,10 +110,11 @@ export default function Screener() {
       try {
         await saveScreen(
           name,
-          activeCriteria.map(({ key, min, max }) => ({
+          activeCriteria.map(({ key, min, max, weight }) => ({
             key,
             ...(min != null && min !== "" ? { min: Number(min) } : {}),
             ...(max != null && max !== "" ? { max: Number(max) } : {}),
+            ...(weight ? { weight: Number(weight) } : {}),
           }))
         );
         setSaveMsg(`Saved "${name}" to your account.`);

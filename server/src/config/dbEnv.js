@@ -26,9 +26,16 @@ export function getDbConnectionOptions() {
   };
 
   if (process.env.DB_SSL === "true") {
-    options.ssl = process.env.DB_SSL_CA
-      ? { ca: readFileSync(process.env.DB_SSL_CA, "utf-8") }
-      : { rejectUnauthorized: false };
+    if (process.env.DB_SSL_CA) {
+      options.ssl = { ca: readFileSync(process.env.DB_SSL_CA, "utf-8") };
+    } else {
+      console.warn(
+        "[db] DB_SSL=true but DB_SSL_CA is not set - the connection is encrypted but the server " +
+          "certificate is NOT verified (MITM-able). Fine for a class project against a host like Aiven; " +
+          "set DB_SSL_CA to that host's CA cert for real verification."
+      );
+      options.ssl = { rejectUnauthorized: false };
+    }
   }
 
   return options;

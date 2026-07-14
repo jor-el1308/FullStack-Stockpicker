@@ -21,6 +21,9 @@ router.post("/users/:id/revoke", adminController.revokeUser);
 router.post("/users/:id/restore", adminController.restoreUser);
 router.post("/users/:id/admin", adminController.setAdmin); // body: { isAdmin: true|false }
 router.get("/users/:id/payments", adminController.getUserPayments);
+router.get("/export/users.csv", adminController.exportUsersCsv);
+router.get("/export/payments.csv", adminController.exportPaymentsCsv);
+router.get("/export/summary.pdf", adminController.exportSummaryPdf);
 router.post("/cache/clear", adminController.clearCache); // force-refresh stock data cache (see utils/cache.js) after re-running ingestion
 
 export default router;
