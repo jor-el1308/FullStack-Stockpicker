@@ -6,6 +6,7 @@ Thin MySQL connection helper for the ingestion pipeline. Uses the same
 you've run `npm run db:migrate --workspace=server` before running ingest.py.
 """
 import ssl as ssl_lib
+import warnings
 
 import pymysql
 import pymysql.cursors
@@ -19,6 +20,12 @@ def _build_ssl_context():
     managed hosts like Aiven without needing the exact right cert chain)."""
     if config.DB_SSL_CA:
         return ssl_lib.create_default_context(cafile=config.DB_SSL_CA)
+    warnings.warn(
+        "DB_SSL=true but DB_SSL_CA is not set - the connection is encrypted but the server "
+        "certificate is NOT verified (MITM-able). Fine for a class project against a host like "
+        "Aiven; set DB_SSL_CA to that host's CA cert for real verification.",
+        stacklevel=2,
+    )
     ctx = ssl_lib.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl_lib.CERT_NONE

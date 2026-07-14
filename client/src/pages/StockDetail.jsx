@@ -4,7 +4,7 @@
  * /api/stocks/:exchangeCode/:stockCode/prices, renders the closing price
  * graph and 52-week high/low (StockDetail typedef in shared/types/index.js).
  */
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { ArrowLeft, TrendingUp, TrendingDown } from "lucide-react";
 import {
@@ -49,6 +49,7 @@ export default function StockDetail() {
   const [prices, setPrices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const requestSeq = useRef(0);
 
   // Screener ("/") and Dashboard ("/dashboard") both link here, so "back"
   // shouldn't be hard-coded to one of them - go back exactly one step in
@@ -64,18 +65,30 @@ export default function StockDetail() {
     }
   }
 
+  // Screener ("/") and Dashboard both link here with a fresh exchangeCode/
+  // stockCode each time, so a fast navigation between two stock pages could
+  // otherwise let the slower request resolve last and overwrite state with
+  // the wrong stock's data - requestSeq guards against that (same pattern
+  // as ScreenerContext.jsx's runSeq).
   useEffect(() => {
+    const seq = ++requestSeq.current;
     setLoading(true);
+    setError(null);
     Promise.all([
       getStockDetail(exchangeCode, stockCode),
       getStockPrices(exchangeCode, stockCode),
     ])
       .then(([detailRes, pricesRes]) => {
+        if (seq !== requestSeq.current) return;
         setDetail(detailRes);
         setPrices(pricesRes ?? []);
       })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (seq === requestSeq.current) setError(err.message);
+      })
+      .finally(() => {
+        if (seq === requestSeq.current) setLoading(false);
+      });
   }, [exchangeCode, stockCode]);
 
   if (loading) {

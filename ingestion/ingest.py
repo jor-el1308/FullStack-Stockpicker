@@ -62,6 +62,23 @@ import universe
 from tickers import EXCHANGES, TICKERS
 
 
+def fetch_with_retry(fn, *, what, retries=3, backoff_seconds=2.0):
+    """Runs `fn()`, retrying on failure with exponential backoff. Yahoo's
+    unofficial API occasionally throttles/blips - without this, a single
+    transient network error or 429 was treated the same as a permanent
+    failure and the data for that call was just dropped.
+    """
+    for attempt in range(1, retries + 1):
+        try:
+            return fn()
+        except Exception as err:
+            if attempt == retries:
+                raise
+            wait = backoff_seconds * (2 ** (attempt - 1))
+            print(f"  [retry] {what} failed (attempt {attempt}/{retries}): {err} - retrying in {wait:.0f}s")
+            time.sleep(wait)
+
+
 def upsert_exchanges(conn, exchanges=None):
     with conn.cursor() as cur:
         for ex in (exchanges if exchanges is not None else EXCHANGES):
@@ -267,11 +284,18 @@ def upsert_financials(conn, t, yf_ticker: yf.Ticker):
 
 
 def ingest_one(conn, t):
+    """Returns True if the stock's core row was written (the minimum needed
+    for this ticker to count as "processed"), False otherwise. Each
+    sub-category below (prices/market_cap/dividends/financials) is still
+    best-effort past that point - a stock with a written row but a failed
+    sub-category is still True here (partial data beats none for a free,
+    field-flaky API), but nothing gets counted as a "success" without at
+    least its core stock row existing."""
     print(f"\n{t['exchange_code']}:{t['stock_code']} ({t['yf_symbol']})")
     yf_ticker = yf.Ticker(t["yf_symbol"])
 
     try:
-        info = yf_ticker.info or {}
+        info = fetch_with_retry(lambda: yf_ticker.info or {}, what=f"info fetch for {t['yf_symbol']}")
     except Exception as err:
         print(f"  could not fetch info: {err}")
         info = {}
@@ -281,11 +305,13 @@ def ingest_one(conn, t):
     except Exception as err:
         print(f"  [stock] failed: {err}")
         conn.rollback()
-        return  # nothing else can go in without the stock row existing (FK constraints)
+        return False  # nothing else can go in without the stock row existing (FK constraints)
 
     try:
         latest_date = get_latest_price_date(conn, t)
-        history = fetch_price_history(t, yf_ticker, latest_date)
+        history = fetch_with_retry(
+            lambda: fetch_price_history(t, yf_ticker, latest_date), what=f"price history for {t['yf_symbol']}"
+        )
         upsert_daily_prices(conn, t, history)
     except Exception as err:
         print(f"  [prices] failed: {err}")
@@ -308,6 +334,8 @@ def ingest_one(conn, t):
     except Exception as err:
         print(f"  [financials] failed: {err}")
         conn.rollback()
+
+    return True
 
 
 def get_ticker_list():
@@ -341,8 +369,17 @@ def main():
         upsert_exchanges(conn, exchanges)
         for t in tickers:
             try:
-                ingest_one(conn, t)
-                succeeded += 1
+                # Keep-alive/reconnect: this loop can run long enough (dozens
+                # to hundreds of tickers) that a MySQL wait_timeout or a
+                # transient network blip would otherwise kill the whole
+                # remaining run with an unhandled exception. ping(reconnect=True)
+                # transparently reconnects if the connection dropped.
+                conn.ping(reconnect=True)
+                ok = ingest_one(conn, t)
+                if ok:
+                    succeeded += 1
+                else:
+                    failed += 1
             except Exception as err:
                 failed += 1
                 print(f"  [ticker] unexpected failure for {t['yf_symbol']}: {err}")

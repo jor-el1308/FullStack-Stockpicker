@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { randomInt, randomUUID } from "node:crypto";
 import { pool } from "../config/db.js";
+import { getJwtSecret } from "../config/jwt.js";
 
 /**
  * Owner: Person 1 (Yong Wee) - Auth & User Management.
@@ -49,9 +50,8 @@ export function verifyPassword(password, hash) {
  * @param {{ id: string }} user
  */
 export function issueToken(user) {
-  const secret = process.env.JWT_SECRET ?? "dev-secret";
   const expiresIn = process.env.JWT_EXPIRES_IN ?? "7d";
-  return jwt.sign({ userId: user.id }, secret, { expiresIn });
+  return jwt.sign({ userId: user.id }, getJwtSecret(), { expiresIn });
 }
 
 /**
@@ -66,8 +66,9 @@ export function issueToken(user) {
  * @param {{ id: string }} user
  */
 export function issuePreAuthToken(user) {
-  const secret = process.env.JWT_SECRET ?? "dev-secret";
-  return jwt.sign({ userId: user.id, purpose: "login-otp" }, secret, { expiresIn: `${OTP_EXPIRY_MINUTES}m` });
+  return jwt.sign({ userId: user.id, purpose: "login-otp" }, getJwtSecret(), {
+    expiresIn: `${OTP_EXPIRY_MINUTES}m`,
+  });
 }
 
 /**
@@ -75,8 +76,7 @@ export function issuePreAuthToken(user) {
  * @returns {string} userId
  */
 export function verifyPreAuthToken(token) {
-  const secret = process.env.JWT_SECRET ?? "dev-secret";
-  const payload = jwt.verify(token, secret);
+  const payload = jwt.verify(token, getJwtSecret());
   if (payload.purpose !== "login-otp") {
     throw new Error("Invalid verification token");
   }
@@ -185,7 +185,8 @@ export async function listCriteriaSets(userId) {
   if (sets.length === 0) return [];
 
   const [items] = await pool.query(
-    `SELECT criteria_set_id AS criteriaSetId, criteria_key AS \`key\`, min_value AS \`min\`, max_value AS \`max\`
+    `SELECT criteria_set_id AS criteriaSetId, criteria_key AS \`key\`, min_value AS \`min\`,
+            max_value AS \`max\`, weight_value AS weight
      FROM saved_criteria_item WHERE criteria_set_id IN (?)`,
     [sets.map((set) => set.id)]
   );
@@ -215,7 +216,7 @@ export async function deleteCriteriaSet(userId, setId) {
 
 /**
  * @param {string} userId
- * @param {{ name: string, criteria: Array<{ key: string, min?: number, max?: number }> }} input
+ * @param {{ name: string, criteria: Array<{ key: string, min?: number, max?: number, weight?: number }> }} input
  */
 export async function saveCriteriaSet(userId, { name, criteria }) {
   const setId = randomUUID();
@@ -229,9 +230,9 @@ export async function saveCriteriaSet(userId, { name, criteria }) {
     ]);
     for (const item of criteria) {
       await conn.query(
-        `INSERT INTO saved_criteria_item (id, criteria_set_id, criteria_key, min_value, max_value)
-         VALUES (?, ?, ?, ?, ?)`,
-        [randomUUID(), setId, item.key, item.min ?? null, item.max ?? null]
+        `INSERT INTO saved_criteria_item (id, criteria_set_id, criteria_key, min_value, max_value, weight_value)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [randomUUID(), setId, item.key, item.min ?? null, item.max ?? null, item.weight ?? null]
       );
     }
     await conn.commit();

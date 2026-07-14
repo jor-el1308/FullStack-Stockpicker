@@ -1,4 +1,5 @@
 import * as stockLookupService from "../services/stockLookup.service.js";
+import { sendInternalError } from "../utils/errors.js";
 
 /**
  * Owner: Person 2 (Charles) - Data Collection & Database Design.
@@ -10,7 +11,7 @@ export async function lookupStocks(req, res) {
     const results = await stockLookupService.searchStocks(query);
     res.json({ success: true, data: results });
   } catch (err) {
-    res.status(500).json({ success: false, error: { message: err.message } });
+    sendInternalError(res, err, "[stocks] lookupStocks");
   }
 }
 
@@ -23,7 +24,7 @@ export async function getStockDetail(req, res) {
     }
     res.json({ success: true, data: detail });
   } catch (err) {
-    res.status(500).json({ success: false, error: { message: err.message } });
+    sendInternalError(res, err, "[stocks] getStockDetail");
   }
 }
 
@@ -33,7 +34,7 @@ export async function getDailyPrices(req, res) {
     const prices = await stockLookupService.getDailyPrices(exchangeCode, stockCode);
     res.json({ success: true, data: prices });
   } catch (err) {
-    res.status(500).json({ success: false, error: { message: err.message } });
+    sendInternalError(res, err, "[stocks] getDailyPrices");
   }
 }
 
@@ -43,6 +44,6 @@ export async function getFinancials(req, res) {
     const financials = await stockLookupService.getFinancials(exchangeCode, stockCode);
     res.json({ success: true, data: financials });
   } catch (err) {
-    res.status(500).json({ success: false, error: { message: err.message } });
+    sendInternalError(res, err, "[stocks] getFinancials");
   }
 }

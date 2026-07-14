@@ -22,7 +22,7 @@ import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { colors, fonts, fontWeights } from "../theme";
 
-const ACTIVATION_FEE_DISPLAY = "$9.99";
+const ACTIVATION_FEE_DISPLAY = "S$9.99";
 
 export default function Activate() {
   const { user, updateUser, logout } = useAuth();

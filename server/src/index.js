@@ -1,10 +1,13 @@
 import "dotenv/config";
 import { createApp } from "./app.js";
 import { pingDb } from "./config/db.js";
+import { getJwtSecret } from "./config/jwt.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
 
 async function main() {
+  getJwtSecret(); // fail fast rather than silently signing tokens with a guessable default
+
   const app = createApp();
 
   const dbOk = await pingDb();

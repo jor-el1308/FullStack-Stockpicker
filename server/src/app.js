@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import cookieParser from "cookie-parser";
 import "dotenv/config";
 
 import authRoutes from "./routes/auth.routes.js";
@@ -11,12 +12,24 @@ import screenerRoutes from "./routes/screener.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import notificationsRoutes from "./routes/notifications.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
+import { stripeWebhook } from "./controllers/subscription.controller.js";
 
 export function createApp() {
   const app = express();
 
   app.use(helmet());
-  app.use(cors({ origin: process.env.CLIENT_ORIGIN ?? "http://localhost:5173" }));
+  // credentials: true is required so the browser sends/accepts the httpOnly
+  // session cookie (see auth.controller.js) on cross-origin requests - e.g.
+  // if the client is ever served from a different origin than this API.
+  app.use(cors({ origin: process.env.CLIENT_ORIGIN ?? "http://localhost:5173", credentials: true }));
+  app.use(cookieParser());
+
+  // Stripe webhook (Person 2 - security fix): must be mounted with the raw
+  // body BEFORE express.json() below, since Stripe's signature check needs
+  // the exact raw bytes of the request body, not the re-serialized parsed
+  // object express.json() would otherwise leave here.
+  app.post("/api/subscription/webhook", express.raw({ type: "application/json" }), stripeWebhook);
+
   app.use(express.json());
 
   app.get("/api/health", (_req, res) => {
