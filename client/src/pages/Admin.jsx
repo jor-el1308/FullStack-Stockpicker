@@ -17,7 +17,18 @@
  */
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { listUsers, revokeUser, restoreUser, setAdmin, getStats, getUserPayments, clearCache } from "../api/admin";
+import {
+  listUsers,
+  revokeUser,
+  restoreUser,
+  setAdmin,
+  getStats,
+  getUserPayments,
+  clearCache,
+  exportUsersCsv,
+  exportPaymentsCsv,
+  exportSummaryPdf,
+} from "../api/admin";
 import { colors, fonts, fontWeights } from "../theme";
 
 function fmtDate(iso) {
@@ -30,7 +41,11 @@ function fmtDateTime(iso) {
   return new Date(iso).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function fmtMoney(cents, currency = "USD") {
+// Default SGD, not USD - the activation fee is charged in SGD (see
+// server/src/services/subscription.service.js's ACTIVATION_CURRENCY,
+// required for GrabPay/PayNow support). Per-payment rows below pass the
+// payment's own stored currency instead of relying on this default.
+function fmtMoney(cents, currency = "SGD") {
   return (cents / 100).toLocaleString(undefined, { style: "currency", currency });
 }
 
@@ -111,6 +126,8 @@ export default function Admin() {
   const [paymentsByUser, setPaymentsByUser] = useState({});
   const [cacheBusy, setCacheBusy] = useState(false);
   const [cacheMsg, setCacheMsg] = useState("");
+  const [exportBusy, setExportBusy] = useState(null); // "users" | "payments" | "pdf" | null
+  const [exportMsg, setExportMsg] = useState("");
 
   function load() {
     setLoading(true);
@@ -190,6 +207,20 @@ export default function Admin() {
     }
   }
 
+  async function handleExport(kind) {
+    setExportBusy(kind);
+    setExportMsg("");
+    try {
+      if (kind === "users") await exportUsersCsv();
+      else if (kind === "payments") await exportPaymentsCsv();
+      else await exportSummaryPdf();
+    } catch (err) {
+      setExportMsg(`Export failed: ${err.message}`);
+    } finally {
+      setExportBusy(null);
+    }
+  }
+
   return (
     <section style={{ padding: 28 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
@@ -202,28 +233,87 @@ export default function Admin() {
           </p>
         </div>
         <div style={{ textAlign: "right" }}>
-          <button
-            type="button"
-            onClick={handleClearCache}
-            disabled={cacheBusy}
-            title="Force-refresh stock data (market cap, prices, financials) instead of waiting out the cache TTL"
-            style={{
-              padding: "8px 14px",
-              borderRadius: 8,
-              border: `1px solid ${colors.border}`,
-              fontFamily: fonts.description,
-              fontSize: 12,
-              color: colors.darkMenu,
-              background: "#fff",
-              cursor: cacheBusy ? "not-allowed" : "pointer",
-              opacity: cacheBusy ? 0.6 : 1,
-            }}
-          >
-            {cacheBusy ? "Clearing..." : "Clear data cache"}
-          </button>
-          {cacheMsg && (
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => handleExport("users")}
+              disabled={exportBusy !== null}
+              title="Download every user account (status, role, payment count/total) as a CSV file"
+              style={{
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: `1px solid ${colors.border}`,
+                fontFamily: fonts.description,
+                fontSize: 12,
+                color: colors.darkMenu,
+                background: "#fff",
+                cursor: exportBusy !== null ? "not-allowed" : "pointer",
+                opacity: exportBusy !== null ? 0.6 : 1,
+              }}
+            >
+              {exportBusy === "users" ? "Exporting..." : "Export users CSV"}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExport("payments")}
+              disabled={exportBusy !== null}
+              title="Download every payment across every user as a CSV file"
+              style={{
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: `1px solid ${colors.border}`,
+                fontFamily: fonts.description,
+                fontSize: 12,
+                color: colors.darkMenu,
+                background: "#fff",
+                cursor: exportBusy !== null ? "not-allowed" : "pointer",
+                opacity: exportBusy !== null ? 0.6 : 1,
+              }}
+            >
+              {exportBusy === "payments" ? "Exporting..." : "Export payments CSV"}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExport("pdf")}
+              disabled={exportBusy !== null}
+              title="Download a branded one-page summary report (stat cards + full user table) as a PDF"
+              style={{
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: `1px solid ${colors.border}`,
+                fontFamily: fonts.description,
+                fontSize: 12,
+                color: colors.darkMenu,
+                background: "#fff",
+                cursor: exportBusy !== null ? "not-allowed" : "pointer",
+                opacity: exportBusy !== null ? 0.6 : 1,
+              }}
+            >
+              {exportBusy === "pdf" ? "Exporting..." : "Export PDF report"}
+            </button>
+            <button
+              type="button"
+              onClick={handleClearCache}
+              disabled={cacheBusy}
+              title="Force-refresh stock data (market cap, prices, financials) instead of waiting out the cache TTL"
+              style={{
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: `1px solid ${colors.border}`,
+                fontFamily: fonts.description,
+                fontSize: 12,
+                color: colors.darkMenu,
+                background: "#fff",
+                cursor: cacheBusy ? "not-allowed" : "pointer",
+                opacity: cacheBusy ? 0.6 : 1,
+              }}
+            >
+              {cacheBusy ? "Clearing..." : "Clear data cache"}
+            </button>
+          </div>
+          {(cacheMsg || exportMsg) && (
             <div style={{ fontFamily: fonts.description, fontSize: 11, color: colors.mutedText, marginTop: 4 }}>
-              {cacheMsg}
+              {exportMsg || cacheMsg}
             </div>
           )}
         </div>

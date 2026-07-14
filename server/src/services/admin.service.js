@@ -133,3 +133,43 @@ export function clearCache() {
   cacheClear();
   return { entriesCleared };
 }
+
+/**
+ * All users plus a per-user paid-total, for the "Export users CSV" button.
+ * Same shape as listUsers() with one extra aggregate column - kept as a
+ * separate query rather than reusing listUsers() so this can grow its own
+ * export-specific columns later without affecting the dashboard table.
+ */
+export async function listUsersForExport() {
+  const [rows] = await pool.query(
+    `SELECT
+       u.id, u.email, u.name, u.is_active AS isActive, u.activated_at AS activatedAt,
+       u.is_admin AS isAdmin, u.created_at AS createdAt,
+       COUNT(p.id) AS paymentCount,
+       COALESCE(SUM(CASE WHEN p.status = 'succeeded' THEN p.amount_cents ELSE 0 END), 0) AS totalPaidCents
+     FROM users u
+     LEFT JOIN payment p ON p.user_id = u.id
+     GROUP BY u.id, u.email, u.name, u.is_active, u.activated_at, u.is_admin, u.created_at
+     ORDER BY u.created_at DESC`
+  );
+  return rows.map((row) => ({ ...row, isActive: Boolean(row.isActive), isAdmin: Boolean(row.isAdmin) }));
+}
+
+/**
+ * Every payment across every user (not scoped to one user, unlike
+ * getUserPayments() above), for the "Export payments CSV" button - includes
+ * the owning user's email so the CSV is self-contained without a join
+ * elsewhere.
+ */
+export async function listAllPaymentsForExport() {
+  const [rows] = await pool.query(
+    `SELECT
+       p.id, u.email AS userEmail, u.name AS userName,
+       p.amount_cents AS amountCents, p.currency, p.status,
+       p.payment_method AS paymentMethod, p.paid_at AS paidAt
+     FROM payment p
+     JOIN users u ON u.id = p.user_id
+     ORDER BY p.paid_at DESC`
+  );
+  return rows;
+}

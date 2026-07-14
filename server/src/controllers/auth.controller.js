@@ -1,6 +1,8 @@
 import { z } from "zod";
 import * as authService from "../services/auth.service.js";
 import { sendOtpEmail } from "../utils/mailer.js";
+import { parseDurationMs } from "../config/jwt.js";
+import { sendInternalError } from "../utils/errors.js";
 
 /**
  * Owner: Person 1 (Yong Wee) - Auth & User Management.
@@ -43,15 +45,37 @@ const criteriaRangeSchema = z
     key: z.string().min(1),
     min: z.number().optional(),
     max: z.number().optional(),
+    weight: z.number().min(0).max(10).optional(),
   })
-  .refine((range) => range.min !== undefined || range.max !== undefined, {
-    message: "Each criteria range needs a min and/or max value",
+  .refine((range) => range.min !== undefined || range.max !== undefined || range.weight !== undefined, {
+    message: "Each criteria range needs a min, max, and/or weight value",
   });
 
 const saveCriteriaSetSchema = z.object({
   name: z.string().min(1).max(128),
   criteria: z.array(criteriaRangeSchema).min(1),
 });
+
+const SESSION_COOKIE = "token";
+
+/**
+ * Sets the session JWT as an httpOnly cookie instead of handing it back in
+ * the JSON body for the client to store in localStorage (see
+ * client/src/api/client.js) - localStorage is readable by any script on the
+ * page, so an XSS bug anywhere (a dependency, a future dangerouslySetHTML)
+ * could exfiltrate the token and fully impersonate the user with no way to
+ * revoke it. An httpOnly cookie can't be read by JS at all.
+ * @param {import("express").Response} res
+ * @param {string} token
+ */
+function setSessionCookie(res, token) {
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: parseDurationMs(process.env.JWT_EXPIRES_IN ?? "7d"),
+  });
+}
 
 function toAuthUser(user) {
   return {
@@ -86,14 +110,15 @@ export async function signup(req, res) {
 
     const user = await authService.createUser({ email, password, name });
     const token = authService.issueToken(user);
-    res.status(201).json({ success: true, data: { user: toAuthUser(user), token } });
+    setSessionCookie(res, token);
+    res.status(201).json({ success: true, data: { user: toAuthUser(user) } });
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") {
       return res
         .status(409)
         .json({ success: false, error: { message: "An account with this email already exists" } });
     }
-    res.status(500).json({ success: false, error: { message: err.message } });
+    sendInternalError(res, err, "[auth] signup");
   }
 }
 
@@ -127,7 +152,7 @@ export async function login(req, res) {
 
     res.json({ success: true, data: { mfaRequired: true, preAuthToken, email: user.email } });
   } catch (err) {
-    res.status(500).json({ success: false, error: { message: err.message } });
+    sendInternalError(res, err, "[auth] login");
   }
 }
 
@@ -161,10 +186,22 @@ export async function verifyLoginOtp(req, res) {
     }
 
     const token = authService.issueToken(user);
-    res.json({ success: true, data: { user: toAuthUser(user), token } });
+    setSessionCookie(res, token);
+    res.json({ success: true, data: { user: toAuthUser(user) } });
   } catch (err) {
-    res.status(500).json({ success: false, error: { message: err.message } });
+    sendInternalError(res, err, "[auth] verifyLoginOtp");
   }
+}
+
+/**
+ * Clears the session cookie set at login/signup. Not strictly required for
+ * server-side security (the JWT stays valid until it expires either way -
+ * this app doesn't track a revocation list) but ensures the browser doesn't
+ * keep sending a cookie the user asked to be logged out from.
+ */
+export function logout(_req, res) {
+  res.clearCookie(SESSION_COOKIE);
+  res.json({ success: true, data: { loggedOut: true } });
 }
 
 /**
@@ -201,7 +238,7 @@ export async function resendLoginOtp(req, res) {
 
     res.json({ success: true, data: { resent: true } });
   } catch (err) {
-    res.status(500).json({ success: false, error: { message: err.message } });
+    sendInternalError(res, err, "[auth] resendLoginOtp");
   }
 }
 
@@ -213,7 +250,7 @@ export async function getProfile(req, res) {
     }
     res.json({ success: true, data: toAuthUser(user) });
   } catch (err) {
-    res.status(500).json({ success: false, error: { message: err.message } });
+    sendInternalError(res, err, "[auth] getProfile");
   }
 }
 
@@ -222,7 +259,7 @@ export async function listCriteriaSets(req, res) {
     const sets = await authService.listCriteriaSets(req.userId);
     res.json({ success: true, data: sets });
   } catch (err) {
-    res.status(500).json({ success: false, error: { message: err.message } });
+    sendInternalError(res, err, "[auth] listCriteriaSets");
   }
 }
 
@@ -234,7 +271,7 @@ export async function saveCriteriaSet(req, res) {
     const set = await authService.saveCriteriaSet(req.userId, parsed.data);
     res.status(201).json({ success: true, data: set });
   } catch (err) {
-    res.status(500).json({ success: false, error: { message: err.message } });
+    sendInternalError(res, err, "[auth] saveCriteriaSet");
   }
 }
 
@@ -246,6 +283,6 @@ export async function deleteCriteriaSet(req, res) {
     }
     res.json({ success: true, data: { id: req.params.id } });
   } catch (err) {
-    res.status(500).json({ success: false, error: { message: err.message } });
+    sendInternalError(res, err, "[auth] deleteCriteriaSet");
   }
 }

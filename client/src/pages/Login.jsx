@@ -58,7 +58,7 @@ function AuthForm({ onAuthenticated }) {
   const [resendMessage, setResendMessage] = useState("");
 
   function finishLogin(data) {
-    onAuthenticated(data.user, data.token);
+    onAuthenticated(data.user);
     // Subscription/paywall (Person 2): unpaid accounts go to /activate
     // instead of the main app.
     navigate(data.user.isActive ? "/" : "/activate");

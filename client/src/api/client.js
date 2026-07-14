@@ -4,22 +4,32 @@
  *
  * Responses are expected to match the ApiResponse shape documented in
  * shared/types/index.js: { success, data?, error? }.
+ *
+ * Auth (Person 1 - security fix): the session token is an httpOnly cookie
+ * set by the server (see server/src/controllers/auth.controller.js), not a
+ * value this file reads or attaches itself - `credentials: "include"` just
+ * tells the browser to send/accept that cookie.
  */
 const BASE_URL = "/api";
 
 async function request(path, options) {
-  const token = localStorage.getItem("authToken");
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options?.headers ?? {}),
     },
   });
 
-  const json = await res.json();
-  if (!json.success || json.data === undefined) {
+  let json;
+  try {
+    json = await res.json();
+  } catch {
+    throw new Error(`Request to ${path} failed (status ${res.status})`);
+  }
+
+  if (!json.success) {
     throw new Error(json.error?.message ?? `Request to ${path} failed`);
   }
   return json.data;

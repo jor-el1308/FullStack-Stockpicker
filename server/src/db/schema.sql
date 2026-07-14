@@ -165,6 +165,7 @@ CREATE TABLE IF NOT EXISTS saved_criteria_item (
   criteria_key      VARCHAR(64) NOT NULL,  -- matches CriteriaKey in shared/types
   min_value         DECIMAL(24,4),
   max_value         DECIMAL(24,4),
+  weight_value      DECIMAL(4,2),  -- ranking weight (Screener.jsx) - a criterion can be weight-only, with no min/max
   CONSTRAINT fk_criteria_item_set FOREIGN KEY (criteria_set_id)
     REFERENCES saved_criteria_set (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
