@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { randomInt, randomUUID } from "node:crypto";
 import { pool } from "../config/db.js";
 import { getJwtSecret } from "../config/jwt.js";
+import * as subscriptionService from "./subscription.service.js";
 
 /**
  * Owner: Person 1 (Yong Wee) - Auth & User Management.
@@ -172,6 +173,62 @@ export async function createUser({ email, password, name }) {
     name,
   ]);
   return findUserById(id);
+}
+
+/**
+ * Fetches just the id + password hash for a user, for re-authenticating a
+ * sensitive action (account deletion). Kept separate from findUserById(),
+ * which deliberately never selects password_hash.
+ * @param {string} id
+ */
+export async function findAuthById(id) {
+  const [rows] = await pool.query(
+    `SELECT id, password_hash AS passwordHash FROM users WHERE id = ? LIMIT 1`,
+    [id]
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Sets a new password for a user (already-authenticated - the caller is
+ * responsible for verifying the current password first, same split as
+ * deleteAccount's password re-confirmation in the controller).
+ * @param {string} userId
+ * @param {string} newPassword plaintext - hashed here before storage
+ */
+export async function updatePassword(userId, newPassword) {
+  const passwordHash = await hashPassword(newPassword);
+  await pool.query(`UPDATE users SET password_hash = ? WHERE id = ?`, [passwordHash, userId]);
+}
+
+/**
+ * Permanently deletes a user's own account. Cancels their live Stripe
+ * subscription first (best-effort - immediate, not at period end, since the
+ * account is going away) so a now-deleted user is never billed again, then
+ * deletes the `users` row.
+ *
+ * Everything owned by the user cascades away via ON DELETE CASCADE
+ * (login_otp, saved_criteria_set -> _item, watchlist -> alert_log). The one
+ * exception is `payment`, whose FK is ON DELETE SET NULL - those rows are
+ * kept (detached/anonymized) so collected revenue stays on the books. See
+ * schema.sql / migration 007.
+ *
+ * A failed Stripe cancellation never blocks the deletion (the row is removed
+ * regardless), but is logged so it can be followed up in the Stripe
+ * Dashboard - an orphaned live subscription would otherwise keep charging a
+ * card for an account that no longer exists.
+ *
+ * @param {string} userId
+ * @returns {Promise<boolean>} true if an account row was actually deleted
+ */
+export async function deleteAccount(userId) {
+  try {
+    await subscriptionService.cancelSubscriptionForUser(userId);
+  } catch (err) {
+    console.error(`[auth] deleteAccount: failed to cancel Stripe subscription for user ${userId}:`, err.message);
+  }
+  const [result] = await pool.query(`DELETE FROM users WHERE id = ?`, [userId]);
+  return result.affectedRows > 0;
 }
 
 /**

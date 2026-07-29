@@ -52,6 +52,11 @@ export async function createCheckoutSession(req, res) {
     const session = await subscriptionService.createCheckoutSession(req.userId, user.email, clientOrigin);
     res.status(201).json({ success: true, data: session });
   } catch (err) {
+    // Already-subscribed guard (prevents duplicate subscriptions) - a 409,
+    // not a generic 500. See createCheckoutSession() in subscription.service.js.
+    if (err.message === subscriptionService.ALREADY_SUBSCRIBED_MESSAGE) {
+      return res.status(409).json({ success: false, error: { message: err.message } });
+    }
     sendSubscriptionError(res, err, "[subscription] createCheckoutSession");
   }
 }
@@ -93,6 +98,38 @@ export async function createBillingPortalSession(req, res) {
       return res.status(400).json({ success: false, error: { message: err.message } });
     }
     sendSubscriptionError(res, err, "[subscription] createBillingPortalSession");
+  }
+}
+
+/**
+ * Native in-app cancellation (the "Cancel subscription" button in Settings).
+ * Schedules the cancellation for the end of the paid period rather than
+ * cutting access off immediately - see scheduleCancelAtPeriodEnd().
+ */
+export async function cancelSubscription(req, res) {
+  try {
+    const status = await subscriptionService.scheduleCancelAtPeriodEnd(req.userId);
+    res.json({ success: true, data: status });
+  } catch (err) {
+    if (err.message?.startsWith("No active subscription") || err.message?.startsWith("Subscription is already")) {
+      return res.status(400).json({ success: false, error: { message: err.message } });
+    }
+    sendSubscriptionError(res, err, "[subscription] cancelSubscription");
+  }
+}
+
+/**
+ * Undoes a pending cancellation (the "Resume subscription" button).
+ */
+export async function resumeSubscription(req, res) {
+  try {
+    const status = await subscriptionService.resumeSubscription(req.userId);
+    res.json({ success: true, data: status });
+  } catch (err) {
+    if (err.message?.startsWith("No subscription") || err.message?.startsWith("Subscription has already")) {
+      return res.status(400).json({ success: false, error: { message: err.message } });
+    }
+    sendSubscriptionError(res, err, "[subscription] resumeSubscription");
   }
 }
 

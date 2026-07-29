@@ -6,11 +6,11 @@ import * as subscriptionService from "./subscription.service.js";
  * Owner: Person 2 (Charles) - Admin Dashboard.
  *
  * User management for admins: list every user, revoke/restore their access
- * (flips `is_active`, same flag the paywall checks), toggle admin status on
- * other accounts, and a quick stats summary. No hard-delete here on
- * purpose - revoking access is reversible, deleting a user's data isn't,
- * and this stays a safer default for a prototype. (Easy to add a real
- * DELETE later if the team wants it - see server/src/routes/admin.routes.js.)
+ * (flips `is_active`, same flag the paywall checks), hard-delete an account
+ * (deleteUser() - irreversible, unlike revoke), toggle admin status on other
+ * accounts, and a quick stats summary. Deleting keeps the user's payment
+ * rows (anonymized, FK ON DELETE SET NULL) so revenue stats stay intact -
+ * everything else they own cascades away.
  */
 
 /**
@@ -74,6 +74,38 @@ export async function revokeUser(userId) {
   await pool.query("UPDATE users SET is_active = 0 WHERE id = ?", [userId]);
   const user = await getUser(userId);
   return stripeCancelError ? { ...user, stripeCancelError } : user;
+}
+
+/**
+ * Permanently deletes a user account (admin hard-delete, the irreversible
+ * counterpart to revokeUser() above). Cancels their live Stripe subscription
+ * first - best-effort, immediately, so a deleted user is never billed again -
+ * then deletes the `users` row.
+ *
+ * The user's own data cascades away (login_otp, saved_criteria_set -> _item,
+ * watchlist -> alert_log), but their `payment` rows are kept and anonymized
+ * (FK ON DELETE SET NULL) so collected revenue stays in the admin stats. See
+ * schema.sql / migration 007.
+ *
+ * Returns { deleted } (false if no such user), plus a `stripeCancelError`
+ * when the Stripe cancellation failed - same contract as revokeUser(), so
+ * the admin UI can warn that an orphaned live subscription may still need
+ * canceling in the Stripe Dashboard. The row is deleted regardless.
+ *
+ * @param {string} userId
+ */
+export async function deleteUser(userId) {
+  let stripeCancelError;
+  try {
+    await subscriptionService.cancelSubscriptionForUser(userId);
+  } catch (err) {
+    console.error(`[admin] deleteUser: failed to cancel Stripe subscription for user ${userId}:`, err.message);
+    stripeCancelError = err.message;
+  }
+
+  const [result] = await pool.query("DELETE FROM users WHERE id = ?", [userId]);
+  const deleted = result.affectedRows > 0;
+  return stripeCancelError ? { deleted, stripeCancelError } : { deleted };
 }
 
 /**
@@ -179,16 +211,20 @@ export async function listUsersForExport() {
  * Every payment across every user (not scoped to one user, unlike
  * getUserPayments() above), for the "Export payments CSV" button - includes
  * the owning user's email so the CSV is self-contained without a join
- * elsewhere.
+ * elsewhere. LEFT JOIN (not inner) so payments detached by an account
+ * deletion (user_id NULL - see deleteUser()) still appear, with a
+ * "(deleted account)" label instead of vanishing from the revenue export.
  */
 export async function listAllPaymentsForExport() {
   const [rows] = await pool.query(
     `SELECT
-       p.id, u.email AS userEmail, u.name AS userName,
+       p.id,
+       COALESCE(u.email, '(deleted account)') AS userEmail,
+       COALESCE(u.name, '(deleted account)') AS userName,
        p.amount_cents AS amountCents, p.currency, p.status,
        p.payment_method AS paymentMethod, p.paid_at AS paidAt
      FROM payment p
-     JOIN users u ON u.id = p.user_id
+     LEFT JOIN users u ON u.id = p.user_id
      ORDER BY p.paid_at DESC`
   );
   return rows;

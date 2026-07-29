@@ -105,7 +105,7 @@ export default function Activate() {
     >
       <div
         style={{
-          background: "#fff",
+          background: colors.surface,
           border: `1px solid ${colors.border}`,
           borderRadius: 12,
           padding: 32,

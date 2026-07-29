@@ -12,6 +12,14 @@
     />
   </head>
   <body>
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem("theme") === "dark" ? "dark" : "light";
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (e) {}
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

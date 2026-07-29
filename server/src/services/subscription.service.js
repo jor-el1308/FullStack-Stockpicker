@@ -53,7 +53,7 @@ export async function getStatus(userId) {
   const [rows] = await pool.query(
     `SELECT is_active AS isActive, activated_at AS activatedAt,
             subscription_status AS subscriptionStatus, current_period_end AS currentPeriodEnd,
-            stripe_customer_id AS stripeCustomerId
+            cancel_at_period_end AS cancelAtPeriodEnd, stripe_customer_id AS stripeCustomerId
      FROM users WHERE id = ? LIMIT 1`,
     [userId]
   );
@@ -64,8 +64,47 @@ export async function getStatus(userId) {
     activatedAt: user.activatedAt,
     subscriptionStatus: user.subscriptionStatus,
     currentPeriodEnd: user.currentPeriodEnd,
+    cancelAtPeriodEnd: Boolean(user.cancelAtPeriodEnd),
     hasBillingAccount: Boolean(user.stripeCustomerId),
   };
+}
+
+/**
+ * Sentinel message prefix thrown by createCheckoutSession() when the user
+ * already has a live subscription. The controller matches on this to return
+ * a 409 rather than a generic 500 - same message-prefix convention the rest
+ * of this layer uses (see createBillingPortalSession's "No billing account").
+ */
+export const ALREADY_SUBSCRIBED_MESSAGE =
+  "You already have an active subscription. Manage it from Settings instead of subscribing again.";
+
+/**
+ * Reuses the user's existing Stripe customer if we already have one (and it
+ * still exists in Stripe), otherwise creates one and stores its id on the
+ * user row. Guarantees exactly one Stripe customer per local user so
+ * repeated checkouts never spawn duplicate customers - the root cause of the
+ * duplicate-subscription incident this hardening addresses.
+ *
+ * @param {import("stripe").Stripe} stripe
+ * @param {string} userId
+ * @param {string} userEmail
+ * @param {string | null | undefined} existingCustomerId
+ * @returns {Promise<string>} a usable Stripe customer id
+ */
+async function ensureStripeCustomer(stripe, userId, userEmail, existingCustomerId) {
+  if (existingCustomerId) {
+    try {
+      const customer = await stripe.customers.retrieve(existingCustomerId);
+      if (customer && !customer.deleted) return existingCustomerId;
+    } catch {
+      // The stored customer no longer exists in Stripe (e.g. test data was
+      // wiped) - fall through and create a fresh one.
+    }
+  }
+
+  const customer = await stripe.customers.create({ email: userEmail, metadata: { userId } });
+  await pool.query(`UPDATE users SET stripe_customer_id = ? WHERE id = ?`, [customer.id, userId]);
+  return customer.id;
 }
 
 /**
@@ -74,6 +113,15 @@ export async function getStatus(userId) {
  * inline `price_data` with `recurring` set rather than a pre-created
  * Stripe Price, same "self-contained prototype, nothing to configure in
  * the Stripe Dashboard first" approach the old one-time flow used.
+ *
+ * Hardened against duplicate subscriptions (see the incident where a failed
+ * post-checkout redirect led a user to retry and end up subscribed twice):
+ *   - Refuses to start a checkout if the user already has a live
+ *     (active/trialing) subscription - they should resume/manage it from
+ *     Settings instead. Throws ALREADY_SUBSCRIBED_MESSAGE.
+ *   - Reuses a single Stripe customer per user (ensureStripeCustomer) rather
+ *     than passing `customer_email`, which makes Stripe mint a brand-new
+ *     customer on every attempt.
  *
  * `metadata.userId` on the *session* is how verifyAndActivateFromSession()
  * ties the redirect back to a local user; `subscription_data.metadata` puts
@@ -88,9 +136,34 @@ export async function getStatus(userId) {
 export async function createCheckoutSession(userId, userEmail, clientOrigin) {
   const stripe = getStripeClient();
 
+  const [rows] = await pool.query(
+    `SELECT stripe_customer_id AS stripeCustomerId, stripe_subscription_id AS stripeSubscriptionId
+     FROM users WHERE id = ? LIMIT 1`,
+    [userId]
+  );
+  const existing = rows[0] ?? {};
+
+  // Guard: if the user already has a live subscription, don't let them start
+  // a second checkout - that's exactly how the duplicate happened. A stored
+  // subscription that Stripe no longer knows about (deleted/wiped test data)
+  // falls through so they can subscribe again.
+  if (existing.stripeSubscriptionId) {
+    try {
+      const current = await stripe.subscriptions.retrieve(existing.stripeSubscriptionId);
+      if (ACTIVE_SUBSCRIPTION_STATUSES.includes(current.status)) {
+        throw new Error(ALREADY_SUBSCRIBED_MESSAGE);
+      }
+    } catch (err) {
+      if (err.message === ALREADY_SUBSCRIBED_MESSAGE) throw err;
+      // Otherwise the subscription couldn't be retrieved - let checkout proceed.
+    }
+  }
+
+  const customerId = await ensureStripeCustomer(stripe, userId, userEmail, existing.stripeCustomerId);
+
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
-    customer_email: userEmail,
+    customer: customerId,
     payment_method_types: ["card"],
     line_items: [
       {
@@ -166,7 +239,8 @@ async function syncSubscriptionFromStripeObject(subscription, userIdHint) {
          stripe_customer_id = ?,
          stripe_subscription_id = ?,
          subscription_status = ?,
-         current_period_end = FROM_UNIXTIME(?)
+         current_period_end = FROM_UNIXTIME(?),
+         cancel_at_period_end = ?
      WHERE id = ?`,
     [
       isNowActive ? 1 : 0,
@@ -175,6 +249,7 @@ async function syncSubscriptionFromStripeObject(subscription, userIdHint) {
       subscription.id,
       subscription.status,
       subscription.current_period_end,
+      subscription.cancel_at_period_end ? 1 : 0,
       userId,
     ]
   );
@@ -356,6 +431,74 @@ export async function cancelSubscriptionForUser(userId) {
 
   const canceled = await stripe.subscriptions.cancel(subscriptionId);
   await syncSubscriptionFromStripeObject(canceled);
+}
+
+/**
+ * Self-service cancellation (the native "Cancel subscription" button in
+ * Settings). Unlike cancelSubscriptionForUser() above - which an admin uses
+ * to revoke access *immediately* - this schedules the cancellation for the
+ * end of the already-paid period (`cancel_at_period_end`), so the user keeps
+ * the access they've paid for until it lapses. The subscription stays
+ * "active" until then, so is_active stays 1 and syncSubscriptionFromStripeObject()
+ * just records the pending cancellation; Stripe fires customer.subscription.deleted
+ * when the period actually ends, which flips is_active off.
+ *
+ * @param {string} userId
+ * @returns {Promise<ReturnType<typeof getStatus>>} the refreshed status
+ */
+export async function scheduleCancelAtPeriodEnd(userId) {
+  const subscriptionId = await getUserSubscriptionId(userId);
+  if (!subscriptionId) {
+    throw new Error("No active subscription to cancel");
+  }
+
+  const stripe = getStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  if (subscription.status === "canceled") {
+    throw new Error("Subscription is already canceled");
+  }
+
+  const updated = await stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true });
+  await syncSubscriptionFromStripeObject(updated);
+  return getStatus(userId);
+}
+
+/**
+ * Undoes a pending cancellation scheduled by scheduleCancelAtPeriodEnd()
+ * (the "Resume subscription" button) - clears cancel_at_period_end so the
+ * subscription renews normally again. A no-op-ish error if there's nothing
+ * to resume.
+ *
+ * @param {string} userId
+ * @returns {Promise<ReturnType<typeof getStatus>>} the refreshed status
+ */
+export async function resumeSubscription(userId) {
+  const subscriptionId = await getUserSubscriptionId(userId);
+  if (!subscriptionId) {
+    throw new Error("No subscription to resume");
+  }
+
+  const stripe = getStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  if (subscription.status === "canceled") {
+    throw new Error("Subscription has already ended - resubscribe instead");
+  }
+
+  const updated = await stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: false });
+  await syncSubscriptionFromStripeObject(updated);
+  return getStatus(userId);
+}
+
+/**
+ * @param {string} userId
+ * @returns {Promise<string | undefined>} the user's Stripe subscription id, if any
+ */
+async function getUserSubscriptionId(userId) {
+  const [rows] = await pool.query(
+    `SELECT stripe_subscription_id AS stripeSubscriptionId FROM users WHERE id = ? LIMIT 1`,
+    [userId]
+  );
+  return rows[0]?.stripeSubscriptionId ?? undefined;
 }
 
 /**

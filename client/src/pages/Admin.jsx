@@ -5,7 +5,9 @@
  * RequireAdmin guard and server/src/middleware/admin.middleware.js for
  * the real (server-side) enforcement.
  *
- * No hard-delete here on purpose - see server/src/services/admin.service.js.
+ * Delete is a permanent hard-delete (irreversible, unlike revoke) - it keeps
+ * the user's anonymized payment rows so revenue stats stay intact. See
+ * server/src/services/admin.service.js.
  *
  * Quick-win additions: summary stat cards, a search box, and per-user
  * payment history (expand a row to fetch it on demand).
@@ -21,6 +23,7 @@ import {
   listUsers,
   revokeUser,
   restoreUser,
+  deleteUser,
   setAdmin,
   getStats,
   getUserPayments,
@@ -59,7 +62,7 @@ const td = { padding: "10px 12px", fontFamily: fonts.description, fontSize: 13, 
 const statCard = {
   flex: 1,
   minWidth: 150,
-  background: "#fff",
+  background: colors.surface,
   border: `1px solid ${colors.border}`,
   borderRadius: 10,
   padding: "14px 16px",
@@ -181,6 +184,43 @@ export default function Admin() {
       // keep charging a now-locked-out user.
       if (stripeCancelError) {
         setError(`Access revoked, but canceling the Stripe subscription failed: ${stripeCancelError}`);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleDelete(row) {
+    if (
+      !window.confirm(
+        `Permanently delete ${row.name} (${row.email})? This can't be undone. Their saved screens and watchlists are removed; payment history is kept (anonymized).`
+      )
+    ) {
+      return;
+    }
+    setBusyId(row.id);
+    setError("");
+    try {
+      const { stripeCancelError } = await deleteUser(row.id);
+      setUsers((prev) => prev.filter((u) => u.id !== row.id));
+      setStats((prev) =>
+        prev
+          ? {
+              ...prev,
+              totalUsers: prev.totalUsers - 1,
+              activeUsers: prev.activeUsers - (row.isActive ? 1 : 0),
+              inactiveUsers: prev.inactiveUsers - (row.isActive ? 0 : 1),
+            }
+          : prev
+      );
+      if (expandedId === row.id) setExpandedId(null);
+      // Account is deleted regardless (see admin.service.js) - this just warns
+      // the admin that Stripe still needs attention so an orphaned live
+      // subscription doesn't keep charging a now-deleted user's card.
+      if (stripeCancelError) {
+        setError(`Account deleted, but canceling the Stripe subscription failed: ${stripeCancelError}`);
       }
     } catch (err) {
       setError(err.message);
@@ -365,7 +405,8 @@ export default function Admin() {
             Admin - Users
           </h1>
           <p style={{ fontFamily: fonts.description, fontSize: 13, color: colors.mutedText, margin: "0 0 18px" }}>
-            Revoking access flips the same flag the paywall checks - it doesn't delete anything.
+            Revoke flips the same flag the paywall checks (reversible). Delete is permanent - it removes the account and
+            their data, but keeps payment history (anonymized).
           </p>
         </div>
         <div style={{ textAlign: "right" }}>
@@ -382,7 +423,7 @@ export default function Admin() {
                 fontFamily: fonts.description,
                 fontSize: 12,
                 color: colors.darkMenu,
-                background: "#fff",
+                background: colors.surface,
                 cursor: exportBusy !== null ? "not-allowed" : "pointer",
                 opacity: exportBusy !== null ? 0.6 : 1,
               }}
@@ -401,7 +442,7 @@ export default function Admin() {
                 fontFamily: fonts.description,
                 fontSize: 12,
                 color: colors.darkMenu,
-                background: "#fff",
+                background: colors.surface,
                 cursor: exportBusy !== null ? "not-allowed" : "pointer",
                 opacity: exportBusy !== null ? 0.6 : 1,
               }}
@@ -420,7 +461,7 @@ export default function Admin() {
                 fontFamily: fonts.description,
                 fontSize: 12,
                 color: colors.darkMenu,
-                background: "#fff",
+                background: colors.surface,
                 cursor: exportBusy !== null ? "not-allowed" : "pointer",
                 opacity: exportBusy !== null ? 0.6 : 1,
               }}
@@ -458,7 +499,7 @@ export default function Admin() {
                 fontFamily: fonts.description,
                 fontSize: 12,
                 color: colors.darkMenu,
-                background: "#fff",
+                background: colors.surface,
                 cursor: cacheBusy ? "not-allowed" : "pointer",
                 opacity: cacheBusy ? 0.6 : 1,
               }}
@@ -482,7 +523,7 @@ export default function Admin() {
       {(reseedStatus?.running || (reseedStatus?.output?.length ?? 0) > 0) && (
         <pre
           style={{
-            background: colors.darkMenu,
+            background: "var(--color-dark-menu)",
             color: "#d8dee9",
             borderRadius: 8,
             padding: "10px 12px",
@@ -505,7 +546,7 @@ export default function Admin() {
           alignItems: "center",
           flexWrap: "wrap",
           gap: 12,
-          background: "#fff",
+          background: colors.surface,
           border: `1px solid ${colors.border}`,
           borderRadius: 10,
           padding: "12px 16px",
@@ -587,7 +628,7 @@ export default function Admin() {
                 fontFamily: fonts.description,
                 fontSize: 12,
                 color: colors.darkMenu,
-                background: "#fff",
+                background: colors.surface,
                 cursor: scheduleBusy ? "not-allowed" : "pointer",
                 opacity: scheduleBusy ? 0.6 : 1,
               }}
@@ -651,7 +692,7 @@ export default function Admin() {
       )}
 
       {!loading && filteredUsers.length > 0 && (
-        <div style={{ background: "#fff", border: `1px solid ${colors.border}`, borderRadius: 10, overflow: "hidden" }}>
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 10, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
@@ -731,12 +772,31 @@ export default function Admin() {
                               fontFamily: fonts.description,
                               fontSize: 12,
                               color: colors.darkMenu,
-                              background: "#fff",
+                              background: colors.surface,
                               cursor: busy || (isSelf && row.isAdmin) ? "not-allowed" : "pointer",
                               opacity: busy || (isSelf && row.isAdmin) ? 0.5 : 1,
                             }}
                           >
                             {row.isAdmin ? "Remove admin" : "Make admin"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy || isSelf}
+                            onClick={() => handleDelete(row)}
+                            title={isSelf ? "You can't delete your own account here" : "Permanently delete this account"}
+                            style={{
+                              padding: "6px 10px",
+                              borderRadius: 6,
+                              border: `1px solid ${colors.badNumber}`,
+                              fontFamily: fonts.description,
+                              fontSize: 12,
+                              color: colors.badNumber,
+                              background: colors.surface,
+                              cursor: busy || isSelf ? "not-allowed" : "pointer",
+                              opacity: busy || isSelf ? 0.5 : 1,
+                            }}
+                          >
+                            Delete
                           </button>
                         </div>
                       </td>

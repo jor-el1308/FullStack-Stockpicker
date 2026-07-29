@@ -56,6 +56,15 @@ const saveCriteriaSetSchema = z.object({
   criteria: z.array(criteriaRangeSchema).min(1),
 });
 
+const deleteAccountSchema = z.object({
+  password: z.string().min(1, "Password is required to delete your account"),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+  newPassword: z.string().min(8, "New password must be at least 8 characters"),
+});
+
 const SESSION_COOKIE = "token";
 
 /**
@@ -251,6 +260,69 @@ export async function getProfile(req, res) {
     res.json({ success: true, data: toAuthUser(user) });
   } catch (err) {
     sendInternalError(res, err, "[auth] getProfile");
+  }
+}
+
+/**
+ * Changes the logged-in user's password. Verifies the current password
+ * first (a session cookie alone shouldn't let someone at an unattended
+ * device silently change it), rejects a no-op change, then stores the new
+ * hash. The session cookie stays valid - the JWT isn't tied to the password.
+ */
+export async function changePassword(req, res) {
+  const parsed = changePasswordSchema.safeParse(req.body);
+  if (!parsed.success) return badRequest(res, parsed);
+  const { currentPassword, newPassword } = parsed.data;
+
+  try {
+    const auth = await authService.findAuthById(req.userId);
+    if (!auth) {
+      return res.status(404).json({ success: false, error: { message: "User not found" } });
+    }
+    const passwordMatches = await authService.verifyPassword(currentPassword, auth.passwordHash);
+    if (!passwordMatches) {
+      return res.status(401).json({ success: false, error: { message: "Current password is incorrect" } });
+    }
+    if (currentPassword === newPassword) {
+      return res
+        .status(400)
+        .json({ success: false, error: { message: "New password must be different from the current one" } });
+    }
+
+    await authService.updatePassword(req.userId, newPassword);
+    res.json({ success: true, data: { changed: true } });
+  } catch (err) {
+    sendInternalError(res, err, "[auth] changePassword");
+  }
+}
+
+/**
+ * Permanently deletes the logged-in user's own account. Re-confirms the
+ * account password first (a session cookie alone shouldn't be enough for an
+ * irreversible, destructive action - the user's device could be unattended),
+ * then deletes and clears the session cookie so the now-invalid session
+ * isn't left lingering in the browser. Their payment history is retained but
+ * anonymized - see authService.deleteAccount().
+ */
+export async function deleteAccount(req, res) {
+  const parsed = deleteAccountSchema.safeParse(req.body);
+  if (!parsed.success) return badRequest(res, parsed);
+
+  try {
+    const auth = await authService.findAuthById(req.userId);
+    if (!auth) {
+      return res.status(404).json({ success: false, error: { message: "User not found" } });
+    }
+    const passwordMatches = await authService.verifyPassword(parsed.data.password, auth.passwordHash);
+    if (!passwordMatches) {
+      return res.status(401).json({ success: false, error: { message: "Incorrect password" } });
+    }
+
+    await authService.deleteAccount(req.userId);
+    res.clearCookie(SESSION_COOKIE);
+    res.json({ success: true, data: { deleted: true } });
+  } catch (err) {
+    sendInternalError(res, err, "[auth] deleteAccount");
   }
 }
 
