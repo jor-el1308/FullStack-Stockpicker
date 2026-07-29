@@ -13,8 +13,8 @@ import { getJwtSecret } from "../config/jwt.js";
  * NOTE for Person 1 (added by Person 2 for subscription/paywall + admin
  * dashboard - please review): findUserByEmail/findUserById now also select
  * is_active/activated_at/is_admin so the frontend/controller can tell
- * whether a user still needs to pay the activation fee, and whether they
- * should see the Admin nav link. New users default to is_active = 0 and
+ * whether a user still needs to subscribe, and whether they should see the
+ * Admin nav link. New users default to is_active = 0 and
  * is_admin = 0 at the DB level (see schema.sql) - createUser() doesn't need
  * to set either.
  *

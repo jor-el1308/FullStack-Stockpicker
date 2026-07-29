@@ -30,6 +30,26 @@ export function clearCache() {
   return api.post("/admin/cache/clear");
 }
 
+// Re-runs ingestion/ingest.py (Yahoo Finance pipeline) so stock data can be
+// refreshed from the website instead of running the script by hand.
+export function runReseed() {
+  return api.post("/admin/reseed");
+}
+
+export function getReseedStatus() {
+  return api.get("/admin/reseed/status");
+}
+
+export function getReseedSchedule() {
+  return api.get("/admin/reseed/schedule");
+}
+
+// intervalHours: positive number to enable/update the auto-reseed
+// schedule, null to disable it.
+export function setReseedSchedule(intervalHours) {
+  return api.post("/admin/reseed/schedule", { intervalHours });
+}
+
 /**
  * Downloads a file from an authenticated API endpoint. Can't reuse the
  * shared `api` wrapper from client.js for this - it always calls

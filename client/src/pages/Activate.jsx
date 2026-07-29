@@ -2,8 +2,10 @@
  * Owner: Person 2 (Charles) - Data Pipeline + Subscription/Paywall.
  *
  * Stripe Checkout (TEST MODE) - real Stripe-hosted payment page, real test
- * card numbers, nothing actually charged. Flow:
- *   1. User clicks "Pay & activate" -> POST /api/subscription/checkout-session
+ * card numbers, nothing actually charged. Monthly recurring subscription
+ * (see subscription.service.js) - Stripe auto-charges the card on file
+ * every month until the user cancels. Flow:
+ *   1. User clicks "Subscribe" -> POST /api/subscription/checkout-session
  *      -> redirect the whole page to the Stripe-hosted url we get back.
  *   2. User pays on Stripe's page with a test card (e.g. 4242 4242 4242 4242,
  *      any future expiry, any CVC).
@@ -22,7 +24,7 @@ import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { colors, fonts, fontWeights } from "../theme";
 
-const ACTIVATION_FEE_DISPLAY = "S$9.99";
+const SUBSCRIPTION_FEE_DISPLAY = "S$9.99/month";
 
 export default function Activate() {
   const { user, updateUser, logout } = useAuth();
@@ -115,9 +117,9 @@ export default function Activate() {
           Activate your account
         </div>
         <p style={{ fontFamily: fonts.description, color: colors.mutedText, fontSize: 13, marginBottom: 20 }}>
-          {user?.name ? `Hi ${user.name}, one` : "One"} more step - a one-time activation fee unlocks the
-          screener, dashboard, and watchlist. This uses Stripe's test mode - you'll pay with a fake test
-          card, nothing is actually charged.
+          {user?.name ? `Hi ${user.name}, one` : "One"} more step - a monthly subscription unlocks the
+          screener, dashboard, and watchlist, and renews automatically until you cancel. This uses Stripe's
+          test mode - you'll pay with a fake test card, nothing is actually charged.
         </p>
 
         {verifying && (
@@ -144,10 +146,10 @@ export default function Activate() {
           }}
         >
           <span style={{ fontFamily: fonts.description, fontSize: 13, color: colors.darkMenu }}>
-            One-time activation fee
+            Monthly subscription
           </span>
           <span style={{ fontFamily: fonts.numeric, fontWeight: fontWeights.numeric, fontSize: 16, color: colors.darkMenu }}>
-            {ACTIVATION_FEE_DISPLAY}
+            {SUBSCRIPTION_FEE_DISPLAY}
           </span>
         </div>
 
@@ -179,7 +181,7 @@ export default function Activate() {
             opacity: submitting || verifying ? 0.7 : 1,
           }}
         >
-          {submitting ? "Redirecting to Stripe..." : `Pay ${ACTIVATION_FEE_DISPLAY} & activate`}
+          {submitting ? "Redirecting to Stripe..." : `Subscribe for ${SUBSCRIPTION_FEE_DISPLAY}`}
         </button>
 
         <button
