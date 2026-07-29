@@ -15,7 +15,7 @@
  * utils/cache.js) - this button lets an admin force a refresh right after
  * re-running the ingestion pipeline instead of waiting out the TTL.
  */
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import {
   listUsers,
@@ -25,6 +25,10 @@ import {
   getStats,
   getUserPayments,
   clearCache,
+  runReseed,
+  getReseedStatus,
+  getReseedSchedule,
+  setReseedSchedule,
   exportUsersCsv,
   exportPaymentsCsv,
   exportSummaryPdf,
@@ -128,6 +132,14 @@ export default function Admin() {
   const [cacheMsg, setCacheMsg] = useState("");
   const [exportBusy, setExportBusy] = useState(null); // "users" | "payments" | "pdf" | null
   const [exportMsg, setExportMsg] = useState("");
+  const [reseedStatus, setReseedStatus] = useState(null); // latest /admin/reseed/status payload
+  const [reseedMsg, setReseedMsg] = useState("");
+  const reseedPollRef = useRef(null);
+  const [schedule, setSchedule] = useState(null); // latest /admin/reseed/schedule payload
+  const [scheduleForm, setScheduleForm] = useState({ amount: 1, unit: "days" });
+  const [scheduleBusy, setScheduleBusy] = useState(false);
+  const [scheduleMsg, setScheduleMsg] = useState("");
+  const scheduleFormInitialized = useRef(false);
 
   function load() {
     setLoading(true);
@@ -152,7 +164,7 @@ export default function Admin() {
     setBusyId(row.id);
     setError("");
     try {
-      const updated = row.isActive ? await revokeUser(row.id) : await restoreUser(row.id);
+      const { stripeCancelError, ...updated } = row.isActive ? await revokeUser(row.id) : await restoreUser(row.id);
       setUsers((prev) => prev.map((u) => (u.id === row.id ? { ...u, ...updated } : u)));
       setStats((prev) =>
         prev
@@ -163,6 +175,13 @@ export default function Admin() {
             }
           : prev
       );
+      // Access is already revoked locally either way (see admin.service.js) -
+      // this just warns the admin that Stripe itself still needs attention
+      // (e.g. STRIPE_SECRET_KEY misconfigured), so billing doesn't silently
+      // keep charging a now-locked-out user.
+      if (stripeCancelError) {
+        setError(`Access revoked, but canceling the Stripe subscription failed: ${stripeCancelError}`);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -204,6 +223,123 @@ export default function Admin() {
       setCacheMsg(`Failed: ${err.message}`);
     } finally {
       setCacheBusy(false);
+    }
+  }
+
+  function stopReseedPolling() {
+    if (reseedPollRef.current) {
+      clearInterval(reseedPollRef.current);
+      reseedPollRef.current = null;
+    }
+  }
+
+  function pollReseedStatus() {
+    getReseedStatus()
+      .then((status) => {
+        setReseedStatus(status);
+        if (!status.running) {
+          stopReseedPolling();
+          // The server pushes next_run_at out by a full interval after
+          // every completed run (manual or scheduled) - refresh so the
+          // displayed "next run" time stays accurate.
+          getReseedSchedule().then(setSchedule).catch(() => {});
+          if (status.error) {
+            setReseedMsg(`Reseed failed: ${status.error}`);
+          } else if (status.exitCode === 0) {
+            setReseedMsg("Reseed complete - fresh data loaded. Use \"Clear data cache\" above to see it immediately.");
+          } else if (status.exitCode != null) {
+            setReseedMsg(`Reseed exited with code ${status.exitCode} - check server logs for details.`);
+          }
+        }
+      })
+      .catch((err) => {
+        setReseedMsg(err.message);
+        stopReseedPolling();
+      });
+  }
+
+  function startReseedPolling() {
+    stopReseedPolling();
+    pollReseedStatus();
+    reseedPollRef.current = setInterval(pollReseedStatus, 2000);
+  }
+
+  // Picks up a run already in flight (e.g. kicked off from another tab, or
+  // this page was reloaded mid-run) instead of only tracking runs started
+  // from this exact page load.
+  useEffect(() => {
+    getReseedStatus()
+      .then((status) => {
+        setReseedStatus(status);
+        if (status.running) startReseedPolling();
+      })
+      .catch(() => {});
+    return stopReseedPolling;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleReseed() {
+    setReseedMsg("");
+    try {
+      await runReseed();
+      startReseedPolling();
+    } catch (err) {
+      setReseedMsg(err.message);
+      // A 409 here means a run (possibly an auto-reseed) is already in
+      // flight - poll anyway so its live progress shows up instead of
+      // just an error toast.
+      startReseedPolling();
+    }
+  }
+
+  useEffect(() => {
+    getReseedSchedule()
+      .then(setSchedule)
+      .catch(() => {});
+  }, []);
+
+  // Prefills the amount/unit inputs from the persisted schedule the first
+  // time it loads, so the form reflects what's actually saved instead of
+  // always defaulting to "1 day" - but only once, so it doesn't stomp on
+  // an admin's in-progress edits every time the schedule refetches.
+  useEffect(() => {
+    if (!schedule || scheduleFormInitialized.current) return;
+    scheduleFormInitialized.current = true;
+    if (schedule.intervalHours) {
+      if (schedule.intervalHours % 24 === 0) {
+        setScheduleForm({ amount: schedule.intervalHours / 24, unit: "days" });
+      } else {
+        setScheduleForm({ amount: schedule.intervalHours, unit: "hours" });
+      }
+    }
+  }, [schedule]);
+
+  async function handleSaveSchedule() {
+    setScheduleBusy(true);
+    setScheduleMsg("");
+    try {
+      const hours = scheduleForm.unit === "days" ? scheduleForm.amount * 24 : scheduleForm.amount;
+      const result = await setReseedSchedule(hours);
+      setSchedule(result);
+      setScheduleMsg("Auto-reseed schedule saved.");
+    } catch (err) {
+      setScheduleMsg(err.message);
+    } finally {
+      setScheduleBusy(false);
+    }
+  }
+
+  async function handleDisableSchedule() {
+    setScheduleBusy(true);
+    setScheduleMsg("");
+    try {
+      const result = await setReseedSchedule(null);
+      setSchedule(result);
+      setScheduleMsg("Auto-reseed disabled.");
+    } catch (err) {
+      setScheduleMsg(err.message);
+    } finally {
+      setScheduleBusy(false);
     }
   }
 
@@ -293,6 +429,25 @@ export default function Admin() {
             </button>
             <button
               type="button"
+              onClick={handleReseed}
+              disabled={reseedStatus?.running}
+              title="Re-run the ingestion pipeline (ingestion/ingest.py) to pull fresh prices, market cap, dividends and financials from Yahoo Finance"
+              style={{
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: `1px solid ${colors.border}`,
+                fontFamily: fonts.description,
+                fontSize: 12,
+                color: "#fff",
+                background: colors.clickable,
+                cursor: reseedStatus?.running ? "not-allowed" : "pointer",
+                opacity: reseedStatus?.running ? 0.6 : 1,
+              }}
+            >
+              {reseedStatus?.running ? "Reseeding..." : "Reseed live data"}
+            </button>
+            <button
+              type="button"
               onClick={handleClearCache}
               disabled={cacheBusy}
               title="Force-refresh stock data (market cap, prices, financials) instead of waiting out the cache TTL"
@@ -316,7 +471,137 @@ export default function Admin() {
               {exportMsg || cacheMsg}
             </div>
           )}
+          {(reseedStatus?.running || reseedMsg) && (
+            <div style={{ fontFamily: fonts.description, fontSize: 11, color: colors.mutedText, marginTop: 4 }}>
+              {reseedStatus?.running ? "Pulling fresh data from Yahoo Finance - this can take a few minutes..." : reseedMsg}
+            </div>
+          )}
         </div>
+      </div>
+
+      {(reseedStatus?.running || (reseedStatus?.output?.length ?? 0) > 0) && (
+        <pre
+          style={{
+            background: colors.darkMenu,
+            color: "#d8dee9",
+            borderRadius: 8,
+            padding: "10px 12px",
+            fontSize: 11,
+            lineHeight: 1.5,
+            maxHeight: 160,
+            overflowY: "auto",
+            margin: "0 0 20px",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {reseedStatus.output.join("\n")}
+        </pre>
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 12,
+          background: "#fff",
+          border: `1px solid ${colors.border}`,
+          borderRadius: 10,
+          padding: "12px 16px",
+          marginBottom: 20,
+        }}
+      >
+        <div style={{ minWidth: 200 }}>
+          <div style={{ fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel, fontSize: 12, color: colors.mutedText, marginBottom: 2 }}>
+            Auto-reseed
+          </div>
+          <div style={{ fontFamily: fonts.description, fontSize: 13, color: colors.darkMenu }}>
+            {schedule?.intervalHours
+              ? `Every ${
+                  schedule.intervalHours % 24 === 0
+                    ? `${schedule.intervalHours / 24} day${schedule.intervalHours === 24 ? "" : "s"}`
+                    : `${schedule.intervalHours} hour${schedule.intervalHours === 1 ? "" : "s"}`
+                } - next run ${fmtDateTime(schedule.nextRunAt)}`
+              : "Off - data only refreshes when you click \"Reseed live data\""}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontFamily: fonts.description, fontSize: 12, color: colors.mutedText }}>Every</span>
+          <input
+            type="number"
+            min="1"
+            value={scheduleForm.amount}
+            onChange={(e) => setScheduleForm((prev) => ({ ...prev, amount: Math.max(1, Number(e.target.value) || 1) }))}
+            style={{
+              width: 60,
+              padding: "6px 8px",
+              borderRadius: 6,
+              border: `1px solid ${colors.border}`,
+              fontFamily: fonts.description,
+              fontSize: 12,
+            }}
+          />
+          <select
+            value={scheduleForm.unit}
+            onChange={(e) => setScheduleForm((prev) => ({ ...prev, unit: e.target.value }))}
+            style={{
+              padding: "6px 8px",
+              borderRadius: 6,
+              border: `1px solid ${colors.border}`,
+              fontFamily: fonts.description,
+              fontSize: 12,
+            }}
+          >
+            <option value="hours">hour(s)</option>
+            <option value="days">day(s)</option>
+          </select>
+          <button
+            type="button"
+            onClick={handleSaveSchedule}
+            disabled={scheduleBusy}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: "none",
+              fontFamily: fonts.description,
+              fontSize: 12,
+              color: "#fff",
+              background: colors.clickable,
+              cursor: scheduleBusy ? "not-allowed" : "pointer",
+              opacity: scheduleBusy ? 0.6 : 1,
+            }}
+          >
+            {schedule?.intervalHours ? "Update" : "Enable"}
+          </button>
+          {schedule?.intervalHours ? (
+            <button
+              type="button"
+              onClick={handleDisableSchedule}
+              disabled={scheduleBusy}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 6,
+                border: `1px solid ${colors.border}`,
+                fontFamily: fonts.description,
+                fontSize: 12,
+                color: colors.darkMenu,
+                background: "#fff",
+                cursor: scheduleBusy ? "not-allowed" : "pointer",
+                opacity: scheduleBusy ? 0.6 : 1,
+              }}
+            >
+              Turn off
+            </button>
+          ) : null}
+        </div>
+
+        {scheduleMsg && (
+          <div style={{ fontFamily: fonts.description, fontSize: 11, color: colors.mutedText, width: "100%" }}>
+            {scheduleMsg}
+          </div>
+        )}
       </div>
 
       {stats && (

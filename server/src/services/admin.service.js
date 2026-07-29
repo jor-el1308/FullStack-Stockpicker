@@ -1,5 +1,6 @@
 import { pool } from "../config/db.js";
 import { cacheClear, cacheSize } from "../utils/cache.js";
+import * as subscriptionService from "./subscription.service.js";
 
 /**
  * Owner: Person 2 (Charles) - Admin Dashboard.
@@ -46,14 +47,33 @@ export async function getUser(userId) {
 }
 
 /**
- * Revokes a user's access (sets is_active = 0) without touching activated_at,
- * so restoring later doesn't look like a brand-new activation.
+ * Revokes a user's access: cancels their actual Stripe subscription (so it
+ * doesn't renew and silently undo this) and sets is_active = 0, without
+ * touching activated_at so restoring later doesn't look like a brand-new
+ * activation.
+ *
+ * The Stripe cancellation is attempted but not required for the revoke to
+ * take effect - is_active is always flipped off regardless, since that's
+ * the flag the paywall actually checks and it must never stay stuck open
+ * because Stripe was briefly unreachable or misconfigured. If cancellation
+ * fails (or the user never subscribed - nothing to cancel), the returned
+ * user carries a `stripeCancelError` so the admin UI can surface it; the
+ * caller should follow up in the Stripe Dashboard directly in that case.
  *
  * @param {string} userId
  */
 export async function revokeUser(userId) {
+  let stripeCancelError;
+  try {
+    await subscriptionService.cancelSubscriptionForUser(userId);
+  } catch (err) {
+    console.error(`[admin] revokeUser: failed to cancel Stripe subscription for user ${userId}:`, err.message);
+    stripeCancelError = err.message;
+  }
+
   await pool.query("UPDATE users SET is_active = 0 WHERE id = ?", [userId]);
-  return getUser(userId);
+  const user = await getUser(userId);
+  return stripeCancelError ? { ...user, stripeCancelError } : user;
 }
 
 /**
@@ -115,8 +135,8 @@ export async function getStats() {
     totalUsers,
     activeUsers,
     inactiveUsers: totalUsers - activeUsers,
-    // Assumes a single currency in practice (USD, from the Stripe test
-    // activation fee) - if the team ever supports multiple payment
+    // Assumes a single currency in practice (SGD, from the Stripe test
+    // subscription fee) - if the team ever supports multiple payment
     // currencies this would need to be broken out per-currency instead.
     totalRevenueCents: Number(revenue.totalRevenueCents),
   };

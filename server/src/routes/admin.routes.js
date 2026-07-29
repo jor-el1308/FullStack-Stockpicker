@@ -25,5 +25,9 @@ router.get("/export/users.csv", adminController.exportUsersCsv);
 router.get("/export/payments.csv", adminController.exportPaymentsCsv);
 router.get("/export/summary.pdf", adminController.exportSummaryPdf);
 router.post("/cache/clear", adminController.clearCache); // force-refresh stock data cache (see utils/cache.js) after re-running ingestion
+router.post("/reseed", adminController.reseedData); // re-run ingestion/ingest.py to pull fresh data from Yahoo Finance
+router.get("/reseed/status", adminController.getReseedStatus); // poll progress/output of the in-flight (or last) reseed run
+router.get("/reseed/schedule", adminController.getReseedSchedule);
+router.post("/reseed/schedule", adminController.setReseedSchedule); // body: { intervalHours: number|null } - null disables auto-reseed
 
 export default router;

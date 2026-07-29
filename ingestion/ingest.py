@@ -51,6 +51,7 @@ DB writes for data that hasn't changed.
 """
 import sys
 import time
+import traceback
 from datetime import timedelta
 
 import pandas as pd
@@ -392,6 +393,11 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception as err:
-        print(f"Fatal error: {err}", file=sys.stderr)
+    except Exception:
+        # Full traceback instead of just str(err) - a bare "[Errno 2] No
+        # such file or directory" gives no clue which call raised it; the
+        # traceback pinpoints the exact line (this bit us once with a
+        # relative DB_SSL_CA path resolving against the wrong cwd - see
+        # config.py).
+        traceback.print_exc()
         sys.exit(1)

@@ -1,4 +1,5 @@
 import * as adminService from "../services/admin.service.js";
+import * as ingestionService from "../services/ingestion.service.js";
 import { toCsv } from "../utils/csv.js";
 import { buildAdminSummaryPdf } from "../utils/pdfReport.js";
 import { sendInternalError } from "../utils/errors.js";
@@ -89,6 +90,54 @@ export function clearCache(_req, res) {
   res.json({ success: true, data: result });
 }
 
+/**
+ * Kicks off ingestion/ingest.py (see ingestion.service.js) to pull fresh
+ * prices/market cap/dividends/financials from Yahoo Finance into MySQL -
+ * lets an admin refresh stock data from the website instead of running
+ * the script by hand. Runs in the background; poll getReseedStatus for
+ * progress.
+ */
+export function reseedData(_req, res) {
+  const result = ingestionService.startReseed();
+  if (!result.started) {
+    const status = result.alreadyRunning ? 409 : 500;
+    const message = result.alreadyRunning ? "A reseed is already running" : result.error;
+    return res.status(status).json({ success: false, error: { message } });
+  }
+  res.json({ success: true, data: { started: true } });
+}
+
+export function getReseedStatus(_req, res) {
+  res.json({ success: true, data: ingestionService.getReseedStatus() });
+}
+
+export function getReseedSchedule(_req, res) {
+  res.json({ success: true, data: ingestionService.getReseedSchedule() });
+}
+
+/**
+ * body: { intervalHours: number|null } - a positive number enables/updates
+ * the auto-reseed schedule, null (or omitted/0) disables it.
+ */
+export async function setReseedSchedule(req, res) {
+  const { intervalHours } = req.body;
+  const isValid =
+    intervalHours === null ||
+    intervalHours === undefined ||
+    (typeof intervalHours === "number" && Number.isFinite(intervalHours) && intervalHours > 0);
+  if (!isValid) {
+    return res
+      .status(400)
+      .json({ success: false, error: { message: "intervalHours must be a positive number, or null to disable" } });
+  }
+  try {
+    const schedule = await ingestionService.setReseedSchedule(intervalHours ?? null);
+    res.json({ success: true, data: schedule });
+  } catch (err) {
+    sendInternalError(res, err, "[admin] setReseedSchedule");
+  }
+}
+
 const USERS_CSV_COLUMNS = [
   { key: "id", header: "User ID" },
   { key: "email", header: "Email" },
@@ -166,8 +215,8 @@ export async function exportPaymentsCsv(_req, res) {
 /**
  * One-shot branded PDF combining the dashboard's stat cards with a full
  * user table - see utils/pdfReport.js. Same currency assumption as
- * getStats() below (single-currency, SGD from the Stripe test activation
- * fee - see subscription.service.js's ACTIVATION_CURRENCY).
+ * getStats() below (single-currency, SGD from the Stripe test subscription
+ * fee - see subscription.service.js's SUBSCRIPTION_CURRENCY).
  */
 export async function exportSummaryPdf(_req, res) {
   try {

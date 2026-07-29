@@ -36,7 +36,7 @@ export async function getStatus(req, res) {
     if (!status) {
       return res.status(404).json({ success: false, error: { message: "User not found" } });
     }
-    res.json({ success: true, data: { ...status, activationFee: subscriptionService.ACTIVATION_FEE } });
+    res.json({ success: true, data: { ...status, subscriptionFee: subscriptionService.SUBSCRIPTION_FEE } });
   } catch (err) {
     sendInternalError(res, err, "[subscription] getStatus");
   }
@@ -79,11 +79,33 @@ export async function listPayments(req, res) {
 }
 
 /**
+ * Hands the client a link to Stripe's hosted billing portal, where a
+ * subscribed user can see invoices, update their card, or cancel - no
+ * custom cancellation UI needed on our side.
+ */
+export async function createBillingPortalSession(req, res) {
+  try {
+    const clientOrigin = process.env.CLIENT_ORIGIN ?? "http://localhost:5173";
+    const session = await subscriptionService.createBillingPortalSession(req.userId, clientOrigin);
+    res.json({ success: true, data: session });
+  } catch (err) {
+    if (err.message?.startsWith("No billing account")) {
+      return res.status(400).json({ success: false, error: { message: err.message } });
+    }
+    sendSubscriptionError(res, err, "[subscription] createBillingPortalSession");
+  }
+}
+
+/**
  * Stripe webhook (Person 2 - security fix): the reliable counterpart to
- * verifySession() above. Registered in server/src/app.js with
- * express.raw() (not express.json()) ahead of the global JSON parser,
- * since Stripe's signature check needs the exact raw request body bytes.
- * See server/.env.example for how to set STRIPE_WEBHOOK_SECRET.
+ * verifySession() above - covers the first payment (if the browser never
+ * makes it back to /activate) as well as everything that happens with no
+ * browser involved at all: renewals, failed renewals, and cancellations
+ * (including ones a user makes from the billing portal). Registered in
+ * server/src/app.js with express.raw() (not express.json()) ahead of the
+ * global JSON parser, since Stripe's signature check needs the exact raw
+ * request body bytes. See server/.env.example for how to set
+ * STRIPE_WEBHOOK_SECRET.
  */
 export async function stripeWebhook(req, res) {
   let event;
@@ -95,8 +117,19 @@ export async function stripeWebhook(req, res) {
   }
 
   try {
-    if (event.type === "checkout.session.completed") {
-      await subscriptionService.handleCheckoutSessionCompleted(event.data.object);
+    switch (event.type) {
+      case "checkout.session.completed":
+        await subscriptionService.handleCheckoutSessionCompleted(event.data.object);
+        break;
+      case "customer.subscription.updated":
+        await subscriptionService.handleSubscriptionUpdated(event.data.object);
+        break;
+      case "customer.subscription.deleted":
+        await subscriptionService.handleSubscriptionDeleted(event.data.object);
+        break;
+      case "invoice.paid":
+        await subscriptionService.handleInvoicePaid(event.data.object);
+        break;
     }
     res.json({ received: true });
   } catch (err) {

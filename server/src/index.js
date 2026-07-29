@@ -2,6 +2,7 @@ import "dotenv/config";
 import { createApp } from "./app.js";
 import { pingDb } from "./config/db.js";
 import { getJwtSecret } from "./config/jwt.js";
+import { initReseedScheduler } from "./services/ingestion.service.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
 
@@ -16,6 +17,8 @@ async function main() {
       "[startup] Could not reach MySQL. Server will still start so frontend/API work can continue, " +
         "but data endpoints will fail until DB_* env vars in server/.env are correct and the schema is migrated."
     );
+  } else {
+    await initReseedScheduler(); // resume the admin dashboard's auto-reseed schedule, if one was set
   }
 
   app.listen(PORT, () => {

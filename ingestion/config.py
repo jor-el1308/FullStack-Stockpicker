@@ -11,7 +11,16 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 ENV_PATH = Path(__file__).resolve().parent / ".env"
-load_dotenv(ENV_PATH)
+# override=True: ingestion/.env must win over any same-named var already in
+# the process environment. Without this, load_dotenv() leaves an existing
+# os.environ value alone - and server/.env defines its own DB_HOST/DB_SSL_CA/
+# etc. with different meanings (e.g. DB_SSL_CA is relative to a different
+# directory). When ingest.py runs as a child process of the Node server
+# (see server/src/services/ingestion.service.js's "Reseed live data"), Node's
+# spawn() inherits the parent's environment, so the server's DB_SSL_CA was
+# silently shadowing ingestion/.env's own value and pointing at a file that
+# doesn't exist relative to ingestion/.
+load_dotenv(ENV_PATH, override=True)
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = int(os.getenv("DB_PORT", "3306"))
@@ -23,6 +32,16 @@ DB_NAME = os.getenv("DB_NAME", "stockpicker")
 # server/.env, for external managed hosts like Aiven that require TLS.
 DB_SSL = os.getenv("DB_SSL", "false").lower() == "true"
 DB_SSL_CA = os.getenv("DB_SSL_CA", "")
+# DB_SSL_CA in .env is written relative to this ingestion/ directory (e.g.
+# "../server/aiven-ca.pem") - resolve it against ENV_PATH's parent instead
+# of leaving it relative to the process's current working directory. A
+# relative path here used to break depending on *how* ingest.py was
+# launched (bare `python ingest.py` from ingestion/ worked, but launching
+# it as a child process from elsewhere - e.g. the admin dashboard's
+# "Reseed live data" button - could resolve it against the wrong cwd and
+# fail with FileNotFoundError when pymysql tried to load the CA file).
+if DB_SSL_CA and not os.path.isabs(DB_SSL_CA):
+    DB_SSL_CA = str((ENV_PATH.parent / DB_SSL_CA).resolve())
 
 # yfinance history period string: "1y", "2y", "5y", "max", etc.
 PRICE_HISTORY_PERIOD = os.getenv("PRICE_HISTORY_PERIOD", "2y")

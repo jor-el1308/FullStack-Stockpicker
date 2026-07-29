@@ -10,7 +10,7 @@ this README covers the scaffold only.
 - **Frontend:** React (Vite) + JavaScript (JSX), React Router
 - **Backend:** Node.js + Express + JavaScript (native ES modules)
 - **Data ingestion:** standalone Python script (`yfinance`) that populates MySQL
-- **Payments:** Stripe Checkout, TEST MODE only (real Stripe infra, fake test cards, nothing charged)
+- **Payments:** Stripe Checkout, TEST MODE only (real Stripe infra, fake test cards, nothing charged) - monthly recurring subscription
 - **Database:** MySQL
 - **Shared:** a `shared/` package of JSDoc type definitions used by both
   sides so the API contract stays documented while each workstream builds
@@ -45,10 +45,13 @@ logic landed.
 **Paywall note:** every route except `/api/auth/*`, `/api/subscription/*`,
 and `/api/admin/*` requires the logged-in user to have an active (paid)
 account - see `server/src/middleware/subscription.middleware.js`. New
-signups start inactive and get redirected to `/activate` until they pay
-the one-time activation fee. Needs to stay in sync with Person 1's
-signup -> login flow since that's what determines when a user first hits
-the paywall.
+signups start inactive and get redirected to `/activate` until they
+subscribe (S$9.99/month, recurring). `users.is_active` is kept in sync
+with the live Stripe subscription status by webhooks (renewals, failed
+renewals, cancellations), not just the first payment - see
+`server/src/services/subscription.service.js`. Needs to stay in sync with
+Person 1's signup -> login flow since that's what determines when a user
+first hits the paywall.
 
 **Admin note (done):** `users.is_admin` gates the `/admin` page and
 `/api/admin/*` routes (view all users, revoke/restore access, promote/demote
@@ -228,7 +231,8 @@ schema or app code depends on where MySQL is hosted.
    UPDATE users SET is_admin = 1 WHERE email = 'you@example.com';
    ```
 
-3. **Set up Stripe (test mode)** for the activation-fee paywall:
+3. **Set up Stripe (test mode)** for the subscription paywall (monthly
+   recurring - S$9.99/month, auto-renews until canceled):
    - Sign up free at https://dashboard.stripe.com/register - no business
      verification needed to use test mode.
    - Make sure the "Test mode" toggle in the dashboard is switched on.
@@ -237,9 +241,15 @@ schema or app code depends on where MySQL is hosted.
    - When paying in the app, use Stripe's test card `4242 4242 4242 4242`,
      any future expiry date, any 3-digit CVC.
    - Never put a real (`sk_live_`) key here - test keys can't move real money.
+   - For renewals/cancellations to actually keep the account's access in
+     sync (not just the first payment), also set up the webhook - see
+     `STRIPE_WEBHOOK_SECRET` in `server/.env.example` for the Stripe CLI /
+     Dashboard steps and which events to subscribe to.
+   - Users can manage or cancel their subscription any time from the
+     account menu's "Manage billing" link (Stripe's hosted billing portal).
 
 4. **Set up welcome emails** (optional) - sent automatically once a new
-   account's activation payment goes through:
+   account's first subscription payment goes through:
    - Easiest for local testing: sign up free at https://ethereal.email,
      which hands you a fake SMTP inbox (nothing is actually delivered, you
      just see the rendered email on their site).
@@ -295,9 +305,11 @@ hardcoding values:
   scale and the data pipeline's rate-limit strategy).
 - EBITA vs EBITDA, missing listed/IPO dates, and cross-currency dividend
   comparison — see `ingestion/README.md` "Known limitations" for detail.
-- Payments are Stripe **test mode** only (one-time activation fee, no
-  recurring billing) - a real launch would need live keys, webhook
-  handling for reliability, and a decision on recurring vs one-time billing.
+- Payments are Stripe **test mode** only (monthly recurring subscription,
+  S$9.99/month) - a real launch would need live keys and the webhook
+  actually configured in production (see `STRIPE_WEBHOOK_SECRET` above),
+  since that's what keeps access in sync on renewals/failed
+  renewals/cancellations, not just the first payment.
 - Admin dashboard has no hard-delete for user accounts (revoke/restore
   access only) - deliberate for now, since deleting a user's data is
   irreversible and wasn't asked for; easy to add if the team wants it.

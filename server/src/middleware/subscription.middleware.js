@@ -4,7 +4,9 @@ import { pool } from "../config/db.js";
  * Owner: Person 2 (Charles) - Data Pipeline + Subscription/Paywall.
  *
  * Paywall gate: blocks any route it's applied to unless the logged-in
- * user has paid the one-time activation fee (`users.is_active = 1`).
+ * user has an active monthly subscription (`users.is_active = 1`, kept in
+ * sync with the live Stripe subscription status by webhooks - see
+ * subscription.service.js).
  *
  * Must run AFTER requireAuth (see middleware/auth.middleware.js) since it
  * needs req.userId to already be set. Applied at the router level to
@@ -34,7 +36,7 @@ export async function requireActiveAccount(req, res, next) {
     if (!user.isActive) {
       return res.status(402).json({
         success: false,
-        error: { message: "Account not activated - pay the one-time activation fee to continue.", code: "ACCOUNT_INACTIVE" },
+        error: { message: "Account not activated - subscribe to continue.", code: "ACCOUNT_INACTIVE" },
       });
     }
     next();

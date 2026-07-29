@@ -3,8 +3,8 @@ import nodemailer from "nodemailer";
 /**
  * Owner: Person 2 (Charles) - Subscription/Paywall.
  *
- * Sends the "welcome" email once a new account's one-time activation
- * payment succeeds (see subscription.service.js -> recordPaymentAndActivate).
+ * Sends the "welcome" email once a new account's first subscription
+ * payment succeeds (see subscription.service.js -> syncSubscriptionFromStripeObject).
  * Uses a generic SMTP transporter so any provider works (Gmail app
  * password, Mailtrap, Ethereal for local testing, SendGrid SMTP, etc.) -
  * see server/.env.example for the SMTP_* variables to set.

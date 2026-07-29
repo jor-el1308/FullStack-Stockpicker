@@ -108,10 +108,21 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash VARCHAR(255) NOT NULL,
   name          VARCHAR(128) NOT NULL,
   -- Subscription/paywall (Person 2): new accounts start inactive and must
-  -- pay a one-time activation fee before accessing anything past login.
-  -- See `payment` table below and server/src/services/subscription.service.js.
+  -- subscribe (monthly, recurring) before accessing anything past login.
+  -- `is_active` mirrors whether the Stripe subscription is currently
+  -- active/trialing (kept in sync by webhooks - see
+  -- server/src/services/subscription.service.js) and is what the paywall
+  -- middleware actually checks; the stripe_* / subscription_status columns
+  -- carry the detail needed to manage/display/renew it.
   is_active     TINYINT(1) NOT NULL DEFAULT 0,
   activated_at  TIMESTAMP NULL DEFAULT NULL,
+  stripe_customer_id     VARCHAR(255) NULL,
+  stripe_subscription_id VARCHAR(255) NULL,
+  -- Mirrors Stripe's Subscription.status verbatim (active, trialing,
+  -- past_due, canceled, unpaid, incomplete, ...) - NULL until the user's
+  -- first checkout session completes.
+  subscription_status    VARCHAR(32) NULL DEFAULT NULL,
+  current_period_end     TIMESTAMP NULL DEFAULT NULL,
   -- Admin dashboard (Person 2): flags an account as an administrator, able
   -- to view all users and revoke/restore access. Nobody can self-serve
   -- this - see server/src/db/migrations/002_add_admin_flag.sql to bootstrap
@@ -121,16 +132,19 @@ CREATE TABLE IF NOT EXISTS users (
 ) ENGINE=InnoDB;
 
 -- Owner: Person 2 (Charles) - Subscription/Paywall.
--- One row per (mock) payment attempt. This is a MOCK payment record, not a
--- real processor integration - see subscription.service.js for details.
+-- One row per successful charge - the first subscription invoice and every
+-- renewal after it (see handleInvoicePaid() in subscription.service.js).
+-- `stripe_invoice_id` is nullable-unique so each Stripe invoice is only
+-- ever recorded once, even if Stripe redelivers the webhook.
 CREATE TABLE IF NOT EXISTS payment (
-  id             CHAR(36) PRIMARY KEY DEFAULT (UUID()),
-  user_id        CHAR(36) NOT NULL,
-  amount_cents   INT NOT NULL,
-  currency       VARCHAR(8) NOT NULL DEFAULT 'USD',
-  status         ENUM('succeeded', 'failed') NOT NULL DEFAULT 'succeeded',
-  payment_method VARCHAR(32) NOT NULL DEFAULT 'mock',
-  paid_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  id               CHAR(36) PRIMARY KEY DEFAULT (UUID()),
+  user_id          CHAR(36) NOT NULL,
+  amount_cents     INT NOT NULL,
+  currency         VARCHAR(8) NOT NULL DEFAULT 'USD',
+  status           ENUM('succeeded', 'failed') NOT NULL DEFAULT 'succeeded',
+  payment_method   VARCHAR(32) NOT NULL DEFAULT 'mock',
+  stripe_invoice_id VARCHAR(255) NULL UNIQUE,
+  paid_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_payment_user FOREIGN KEY (user_id)
     REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
@@ -197,4 +211,17 @@ CREATE TABLE IF NOT EXISTS watchlist_alert_log (
   message       TEXT,
   CONSTRAINT fk_alert_watchlist FOREIGN KEY (watchlist_id)
     REFERENCES watchlist (id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- Single-row config for the admin dashboard's "auto-reseed" toggle (see
+-- server/src/services/ingestion.service.js) - lets the ingestion pipeline
+-- (ingestion/ingest.py) re-run on a fixed interval instead of only ever
+-- being triggered manually. next_run_at_ms/interval stored as plain
+-- milliseconds (not TIMESTAMP) so the scheduler's Date.now() comparisons
+-- in Node don't have to round-trip through MySQL's session timezone.
+CREATE TABLE IF NOT EXISTS reseed_schedule (
+  id             TINYINT PRIMARY KEY DEFAULT 1,
+  interval_hours INT NULL,      -- NULL = auto-reseed disabled
+  next_run_at_ms BIGINT NULL,   -- epoch ms of the next scheduled run; NULL when disabled
+  updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
