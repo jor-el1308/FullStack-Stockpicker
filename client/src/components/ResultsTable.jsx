@@ -39,7 +39,7 @@ export default function ResultsTable({
 
   if (rows.length === 0) {
     return (
-      <p style={{ fontFamily: fonts.description, color: colors.mutedText ?? "#5B6B85", fontSize: 13 }}>
+      <p style={{ fontFamily: fonts.description, color: colors.mutedText, fontSize: 13 }}>
         {emptyMessage ?? "No results yet. Run the screener above."}
       </p>
     );
@@ -126,7 +126,7 @@ export default function ResultsTable({
             padding: "12px 4px 4px",
             fontFamily: fonts.description,
             fontSize: 13,
-            color: colors.mutedText ?? "#5B6B85",
+            color: colors.mutedText,
           }}
         >
           <span>
@@ -163,9 +163,9 @@ function pagerButtonStyle(disabled) {
   return {
     padding: "6px 12px",
     borderRadius: 6,
-    border: `1px solid ${colors.border ?? "#E1E7F0"}`,
-    background: "#fff",
-    color: disabled ? (colors.mutedText ?? "#5B6B85") : colors.darkMenu,
+    border: `1px solid ${colors.border}`,
+    background: colors.surface,
+    color: disabled ? colors.mutedText : colors.darkMenu,
     fontFamily: fonts.description,
     fontSize: 12,
     cursor: disabled ? "not-allowed" : "pointer",

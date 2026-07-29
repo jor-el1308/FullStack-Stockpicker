@@ -54,11 +54,23 @@ Person 1's signup -> login flow since that's what determines when a user
 first hits the paywall.
 
 **Admin note (done):** `users.is_admin` gates the `/admin` page and
-`/api/admin/*` routes (view all users, revoke/restore access, promote/demote
-admins, per-user payment history, summary stats) - see
-`server/src/middleware/admin.middleware.js`. Nobody can self-promote to
+`/api/admin/*` routes (view all users, revoke/restore access, hard-delete an
+account, promote/demote admins, per-user payment history, summary stats) -
+see `server/src/middleware/admin.middleware.js`. Nobody can self-promote to
 admin; see `server/src/db/migrations/002_add_admin_flag.sql` for how to
 bootstrap the first admin account.
+
+**Account management (done):** users can manage their own subscription and
+account from `/settings` (`client/src/pages/Settings.jsx`): a native "Cancel
+subscription" button (cancels at period end so paid-for access isn't cut off
+early - `POST /api/subscription/cancel`), a "Resume subscription" undo, the
+Stripe hosted billing portal for invoices/payment method, and a "Delete
+account" flow that re-confirms the password (`DELETE /api/auth/me`). Admins
+can hard-delete any account from `/admin` (`DELETE /api/admin/users/:id`).
+Deleting an account cancels its live subscription and removes the user's own
+data (saved screens, watchlists), but **keeps their `payment` rows,
+anonymized** (FK `ON DELETE SET NULL`) so collected revenue stays in the
+admin stats - see `server/src/db/migrations/007_add_account_deletion.sql`.
 
 **Login 2FA note (done):** signup now requires the password twice
 (confirm-password field, checked client-side) and login is two-stage - after
@@ -310,6 +322,8 @@ hardcoding values:
   actually configured in production (see `STRIPE_WEBHOOK_SECRET` above),
   since that's what keeps access in sync on renewals/failed
   renewals/cancellations, not just the first payment.
-- Admin dashboard has no hard-delete for user accounts (revoke/restore
-  access only) - deliberate for now, since deleting a user's data is
-  irreversible and wasn't asked for; easy to add if the team wants it.
+- Account deletion (self-service and admin hard-delete) keeps `payment` rows
+  but anonymizes them (detaches from the user) so revenue history survives.
+  If a future requirement needs full erasure instead (e.g. a stricter
+  data-retention/GDPR stance), the FK in `schema.sql` / migration 007 would
+  change from `ON DELETE SET NULL` back to `ON DELETE CASCADE`.

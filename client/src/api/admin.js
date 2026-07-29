@@ -18,6 +18,12 @@ export function restoreUser(userId) {
   return api.post(`/admin/users/${userId}/restore`);
 }
 
+// Hard-delete (irreversible). Keeps the user's anonymized payment rows so
+// revenue stats stay intact - see server/src/services/admin.service.js.
+export function deleteUser(userId) {
+  return api.delete(`/admin/users/${userId}`);
+}
+
 export function setAdmin(userId, isAdmin) {
   return api.post(`/admin/users/${userId}/admin`, { isAdmin });
 }

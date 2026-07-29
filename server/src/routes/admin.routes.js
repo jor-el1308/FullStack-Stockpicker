@@ -6,8 +6,8 @@ import { requireAdmin } from "../middleware/admin.middleware.js";
 /**
  * Owner: Person 2 (Charles) - Admin Dashboard.
  *
- * View all users and revoke/restore their access. No hard-delete on
- * purpose - see admin.service.js docstring. Deliberately NOT gated by
+ * View all users, revoke/restore their access, or hard-delete an account
+ * (irreversible - see deleteUser() in admin.service.js). Deliberately NOT gated by
  * requireActiveAccount (see subscription.middleware.js) - an admin
  * managing the system shouldn't be locked out by their own paywall status.
  */
@@ -19,6 +19,8 @@ router.get("/stats", adminController.getStats);
 router.get("/users", adminController.listUsers);
 router.post("/users/:id/revoke", adminController.revokeUser);
 router.post("/users/:id/restore", adminController.restoreUser);
+router.delete("/users/:id", adminController.deleteUser); // hard-delete (irreversible) - keeps anonymized payment rows
+
 router.post("/users/:id/admin", adminController.setAdmin); // body: { isAdmin: true|false }
 router.get("/users/:id/payments", adminController.getUserPayments);
 router.get("/export/users.csv", adminController.exportUsersCsv);

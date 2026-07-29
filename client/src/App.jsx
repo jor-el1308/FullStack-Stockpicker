@@ -8,10 +8,10 @@ import Dashboard from "./pages/Dashboard";
 import StockDetail from "./pages/StockDetail";
 import Watchlist from "./pages/Watchlist";
 import Admin from "./pages/Admin";
-import { useState } from "react";
+import Settings from "./pages/Settings";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ScreenerProvider } from "./context/ScreenerContext";
-import { api } from "./api/client";
+import { ThemeProvider } from "./context/ThemeContext";
 
 function sidebarLinkClass({ isActive }) {
   return "app-sidebar-link" + (isActive ? " active" : "");
@@ -76,6 +76,14 @@ function Sidebar() {
             </NavLink>
           </div>
         )}
+
+        <div className="app-sidebar-group">
+          <div className="app-sidebar-group-label">Account</div>
+          <NavLink to="/settings" className={sidebarLinkClass}>
+            <i className="bi bi-gear" />
+            <span>Settings</span>
+          </NavLink>
+        </div>
       </nav>
     </aside>
   );
@@ -91,26 +99,10 @@ function Sidebar() {
 function TopBar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [openingBilling, setOpeningBilling] = useState(false);
 
   function handleLogout() {
     logout();
     navigate("/login");
-  }
-
-  // Opens Stripe's hosted billing portal (invoices, payment method,
-  // cancel) - see POST /api/subscription/billing-portal in
-  // subscription.service.js. Only ever shown to an already-subscribed
-  // user, so a billing account is guaranteed to exist.
-  async function handleManageBilling() {
-    setOpeningBilling(true);
-    try {
-      const { url } = await api.post("/subscription/billing-portal");
-      window.location.href = url;
-    } catch (err) {
-      setOpeningBilling(false);
-      window.alert(err.message);
-    }
   }
 
   const initials = user?.name
@@ -147,17 +139,10 @@ function TopBar() {
               </div>
             </div>
             <div className="user-menu-divider" />
-            {user.isActive && (
-              <button
-                type="button"
-                onClick={handleManageBilling}
-                disabled={openingBilling}
-                className="user-menu-logout"
-              >
-                <i className="bi bi-credit-card" />
-                {openingBilling ? "Opening billing..." : "Manage billing"}
-              </button>
-            )}
+            <button type="button" onClick={() => navigate("/settings")} className="user-menu-logout">
+              <i className="bi bi-gear" />
+              Settings
+            </button>
             <button type="button" onClick={handleLogout} className="user-menu-logout">
               <i className="bi bi-box-arrow-right" />
               Log out
@@ -272,6 +257,14 @@ function AppLayout() {
           </RequireAdmin>
         }
       />
+      <Route
+        path="/settings"
+        element={
+          <RequireActive>
+            <Settings />
+          </RequireActive>
+        }
+      />
     </Routes>
   );
 
@@ -294,12 +287,14 @@ function AppLayout() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <ScreenerProvider>
-        <BrowserRouter>
-          <AppLayout />
-        </BrowserRouter>
-      </ScreenerProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <ScreenerProvider>
+          <BrowserRouter>
+            <AppLayout />
+          </BrowserRouter>
+        </ScreenerProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

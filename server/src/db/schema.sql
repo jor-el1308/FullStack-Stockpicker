@@ -123,6 +123,13 @@ CREATE TABLE IF NOT EXISTS users (
   -- first checkout session completes.
   subscription_status    VARCHAR(32) NULL DEFAULT NULL,
   current_period_end     TIMESTAMP NULL DEFAULT NULL,
+  -- Mirrors Stripe's Subscription.cancel_at_period_end: 1 once the user (or
+  -- an admin) schedules a cancellation that hasn't taken effect yet, so the
+  -- account stays active (is_active = 1) through the already-paid period and
+  -- the UI can show "cancels on <current_period_end>". Reset to 0 if they
+  -- resume before it lapses. Kept in sync alongside subscription_status by
+  -- syncSubscriptionFromStripeObject() - see subscription.service.js.
+  cancel_at_period_end   TINYINT(1) NOT NULL DEFAULT 0,
   -- Admin dashboard (Person 2): flags an account as an administrator, able
   -- to view all users and revoke/restore access. Nobody can self-serve
   -- this - see server/src/db/migrations/002_add_admin_flag.sql to bootstrap
@@ -136,9 +143,14 @@ CREATE TABLE IF NOT EXISTS users (
 -- renewal after it (see handleInvoicePaid() in subscription.service.js).
 -- `stripe_invoice_id` is nullable-unique so each Stripe invoice is only
 -- ever recorded once, even if Stripe redelivers the webhook.
+-- `user_id` is nullable with ON DELETE SET NULL (not CASCADE) so deleting a
+-- user account *detaches* their payment rows rather than erasing them -
+-- collected revenue stays on the books (admin revenue stats sum this table
+-- directly), just anonymized. See deleteAccount()/deleteUser() and
+-- migration 007.
 CREATE TABLE IF NOT EXISTS payment (
   id               CHAR(36) PRIMARY KEY DEFAULT (UUID()),
-  user_id          CHAR(36) NOT NULL,
+  user_id          CHAR(36) NULL,
   amount_cents     INT NOT NULL,
   currency         VARCHAR(8) NOT NULL DEFAULT 'USD',
   status           ENUM('succeeded', 'failed') NOT NULL DEFAULT 'succeeded',
@@ -146,7 +158,7 @@ CREATE TABLE IF NOT EXISTS payment (
   stripe_invoice_id VARCHAR(255) NULL UNIQUE,
   paid_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_payment_user FOREIGN KEY (user_id)
-    REFERENCES users (id) ON DELETE CASCADE
+    REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 -- Owner: Person 2 (Charles) - added for login 2FA on top of Person 1's auth

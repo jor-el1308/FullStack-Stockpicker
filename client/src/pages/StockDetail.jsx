@@ -19,7 +19,11 @@ import {
 import { colors, fonts, fontWeights } from "../theme";
 import { getStockDetail, getStockPrices } from "../api/stocks";
 
-const NEUTRAL = { white: "#FFFFFF", border: "#E1E7F0", textMuted: "#5B6B85" };
+const NEUTRAL = {
+  white: "var(--color-surface)",
+  border: "var(--color-border)",
+  textMuted: "var(--color-muted-text)",
+};
 
 function fmt(n, d = 2) {
   return Number(n).toFixed(d);

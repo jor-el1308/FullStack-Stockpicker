@@ -9,7 +9,7 @@ import { fonts, fontWeights } from "../theme";
 import ResultsTable from "../components/ResultsTable";
 import { getStocks } from "../api/stocks";
 
-const NEUTRAL = { textMuted: "#5B6B85", bad: "#D16B6B" };
+const NEUTRAL = { textMuted: "var(--color-muted-text)", bad: "#D16B6B" };
 
 export default function Dashboard() {
   const navigate = useNavigate();

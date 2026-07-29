@@ -44,6 +44,22 @@ export async function revokeUser(req, res) {
   }
 }
 
+export async function deleteUser(req, res) {
+  const targetId = req.params.id;
+  if (targetId === req.userId) {
+    return res.status(400).json({ success: false, error: { message: "You can't delete your own account here" } });
+  }
+  try {
+    const result = await adminService.deleteUser(targetId);
+    if (!result.deleted) {
+      return res.status(404).json({ success: false, error: { message: "User not found" } });
+    }
+    res.json({ success: true, data: result });
+  } catch (err) {
+    sendInternalError(res, err, "[admin] deleteUser");
+  }
+}
+
 export async function restoreUser(req, res) {
   try {
     const user = await adminService.restoreUser(req.params.id);

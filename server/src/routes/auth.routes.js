@@ -17,6 +17,12 @@ router.post("/verify-otp", otpLimiter, authController.verifyLoginOtp);
 router.post("/resend-otp", otpLimiter, authController.resendLoginOtp);
 router.post("/logout", authController.logout);
 router.get("/me", requireAuth, authController.getProfile);
+// Change password - re-confirms the current password ({ currentPassword,
+// newPassword }). See auth.controller.js.
+router.post("/change-password", requireAuth, authController.changePassword);
+// Self-service account deletion - re-confirms the account password in the
+// body ({ password }). See auth.controller.js / auth.service.js.
+router.delete("/me", requireAuth, authController.deleteAccount);
 
 // Saved criteria sets ("Criteria 1, 2, 3 quick-select" feature)
 router.get("/me/criteria-sets", requireAuth, authController.listCriteriaSets);
