@@ -18,6 +18,10 @@ router.use(requireAuth, requireActiveAccount);
 
 // Requirement doc section 4: exchange + stock code -> stock name lookup
 router.get("/lookup", stocksController.lookupStocks);
+// Compact multi-stock feed for the top-bar ticker tape (must stay above the
+// two-segment ":exchangeCode/:stockCode" routes; a single segment can't match
+// those anyway, but keep it grouped with the other collection-level routes).
+router.get("/ticker", stocksController.getTicker);
 router.get("/:exchangeCode/:stockCode", stocksController.getStockDetail);
 router.get("/:exchangeCode/:stockCode/prices", stocksController.getDailyPrices);
 router.get("/:exchangeCode/:stockCode/financials", stocksController.getFinancials);

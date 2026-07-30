@@ -230,6 +230,12 @@ export default function Admin() {
   }
 
   async function handleToggleAdmin(row) {
+    const question = row.isAdmin
+      ? `Remove admin access from ${row.name} (${row.email})? They'll lose access to this admin dashboard.`
+      : `Make ${row.name} (${row.email}) an admin? They'll get full access to this admin dashboard - including managing users and admins.`;
+    if (!window.confirm(question)) {
+      return;
+    }
     setBusyId(row.id);
     setError("");
     try {
@@ -319,6 +325,13 @@ export default function Admin() {
   }, []);
 
   async function handleReseed() {
+    if (
+      !window.confirm(
+        "Reseed live data now? This re-runs the full ingestion pipeline against Yahoo Finance and can take a few minutes, overwriting current stock data."
+      )
+    ) {
+      return;
+    }
     setReseedMsg("");
     try {
       await runReseed();
@@ -468,181 +481,13 @@ export default function Admin() {
             >
               {exportBusy === "pdf" ? "Exporting..." : "Export PDF report"}
             </button>
-            <button
-              type="button"
-              onClick={handleReseed}
-              disabled={reseedStatus?.running}
-              title="Re-run the ingestion pipeline (ingestion/ingest.py) to pull fresh prices, market cap, dividends and financials from Yahoo Finance"
-              style={{
-                padding: "8px 14px",
-                borderRadius: 8,
-                border: `1px solid ${colors.border}`,
-                fontFamily: fonts.description,
-                fontSize: 12,
-                color: "#fff",
-                background: colors.clickable,
-                cursor: reseedStatus?.running ? "not-allowed" : "pointer",
-                opacity: reseedStatus?.running ? 0.6 : 1,
-              }}
-            >
-              {reseedStatus?.running ? "Reseeding..." : "Reseed live data"}
-            </button>
-            <button
-              type="button"
-              onClick={handleClearCache}
-              disabled={cacheBusy}
-              title="Force-refresh stock data (market cap, prices, financials) instead of waiting out the cache TTL"
-              style={{
-                padding: "8px 14px",
-                borderRadius: 8,
-                border: `1px solid ${colors.border}`,
-                fontFamily: fonts.description,
-                fontSize: 12,
-                color: colors.darkMenu,
-                background: colors.surface,
-                cursor: cacheBusy ? "not-allowed" : "pointer",
-                opacity: cacheBusy ? 0.6 : 1,
-              }}
-            >
-              {cacheBusy ? "Clearing..." : "Clear data cache"}
-            </button>
           </div>
-          {(cacheMsg || exportMsg) && (
+          {exportMsg && (
             <div style={{ fontFamily: fonts.description, fontSize: 11, color: colors.mutedText, marginTop: 4 }}>
-              {exportMsg || cacheMsg}
-            </div>
-          )}
-          {(reseedStatus?.running || reseedMsg) && (
-            <div style={{ fontFamily: fonts.description, fontSize: 11, color: colors.mutedText, marginTop: 4 }}>
-              {reseedStatus?.running ? "Pulling fresh data from Yahoo Finance - this can take a few minutes..." : reseedMsg}
+              {exportMsg}
             </div>
           )}
         </div>
-      </div>
-
-      {(reseedStatus?.running || (reseedStatus?.output?.length ?? 0) > 0) && (
-        <pre
-          style={{
-            background: "var(--color-dark-menu)",
-            color: "#d8dee9",
-            borderRadius: 8,
-            padding: "10px 12px",
-            fontSize: 11,
-            lineHeight: 1.5,
-            maxHeight: 160,
-            overflowY: "auto",
-            margin: "0 0 20px",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-          }}
-        >
-          {reseedStatus.output.join("\n")}
-        </pre>
-      )}
-
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: 12,
-          background: colors.surface,
-          border: `1px solid ${colors.border}`,
-          borderRadius: 10,
-          padding: "12px 16px",
-          marginBottom: 20,
-        }}
-      >
-        <div style={{ minWidth: 200 }}>
-          <div style={{ fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel, fontSize: 12, color: colors.mutedText, marginBottom: 2 }}>
-            Auto-reseed
-          </div>
-          <div style={{ fontFamily: fonts.description, fontSize: 13, color: colors.darkMenu }}>
-            {schedule?.intervalHours
-              ? `Every ${
-                  schedule.intervalHours % 24 === 0
-                    ? `${schedule.intervalHours / 24} day${schedule.intervalHours === 24 ? "" : "s"}`
-                    : `${schedule.intervalHours} hour${schedule.intervalHours === 1 ? "" : "s"}`
-                } - next run ${fmtDateTime(schedule.nextRunAt)}`
-              : "Off - data only refreshes when you click \"Reseed live data\""}
-          </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontFamily: fonts.description, fontSize: 12, color: colors.mutedText }}>Every</span>
-          <input
-            type="number"
-            min="1"
-            value={scheduleForm.amount}
-            onChange={(e) => setScheduleForm((prev) => ({ ...prev, amount: Math.max(1, Number(e.target.value) || 1) }))}
-            style={{
-              width: 60,
-              padding: "6px 8px",
-              borderRadius: 6,
-              border: `1px solid ${colors.border}`,
-              fontFamily: fonts.description,
-              fontSize: 12,
-            }}
-          />
-          <select
-            value={scheduleForm.unit}
-            onChange={(e) => setScheduleForm((prev) => ({ ...prev, unit: e.target.value }))}
-            style={{
-              padding: "6px 8px",
-              borderRadius: 6,
-              border: `1px solid ${colors.border}`,
-              fontFamily: fonts.description,
-              fontSize: 12,
-            }}
-          >
-            <option value="hours">hour(s)</option>
-            <option value="days">day(s)</option>
-          </select>
-          <button
-            type="button"
-            onClick={handleSaveSchedule}
-            disabled={scheduleBusy}
-            style={{
-              padding: "6px 12px",
-              borderRadius: 6,
-              border: "none",
-              fontFamily: fonts.description,
-              fontSize: 12,
-              color: "#fff",
-              background: colors.clickable,
-              cursor: scheduleBusy ? "not-allowed" : "pointer",
-              opacity: scheduleBusy ? 0.6 : 1,
-            }}
-          >
-            {schedule?.intervalHours ? "Update" : "Enable"}
-          </button>
-          {schedule?.intervalHours ? (
-            <button
-              type="button"
-              onClick={handleDisableSchedule}
-              disabled={scheduleBusy}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 6,
-                border: `1px solid ${colors.border}`,
-                fontFamily: fonts.description,
-                fontSize: 12,
-                color: colors.darkMenu,
-                background: colors.surface,
-                cursor: scheduleBusy ? "not-allowed" : "pointer",
-                opacity: scheduleBusy ? 0.6 : 1,
-              }}
-            >
-              Turn off
-            </button>
-          ) : null}
-        </div>
-
-        {scheduleMsg && (
-          <div style={{ fontFamily: fonts.description, fontSize: 11, color: colors.mutedText, width: "100%" }}>
-            {scheduleMsg}
-          </div>
-        )}
       </div>
 
       {stats && (
@@ -825,6 +670,192 @@ export default function Admin() {
           No users match "{search}".
         </p>
       )}
+
+      {/* Data management: reseeding the stock dataset lives here, away from the
+          user-facing actions above, since it's an infrequent, heavy operation. */}
+      <div style={{ marginTop: 32, paddingTop: 24, borderTop: `1px solid ${colors.border}` }}>
+        <h2 style={{ fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel, fontSize: 16, margin: "0 0 4px", color: colors.darkMenu }}>
+          Data management
+        </h2>
+        <p style={{ fontFamily: fonts.description, fontSize: 13, color: colors.mutedText, margin: "0 0 14px" }}>
+          Refresh the stock dataset from Yahoo Finance. Reseeding re-runs the full ingestion pipeline and can take a few
+          minutes; clear the data cache afterwards to see the new numbers immediately.
+        </p>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+          <button
+            type="button"
+            onClick={handleReseed}
+            disabled={reseedStatus?.running}
+            title="Re-run the ingestion pipeline (ingestion/ingest.py) to pull fresh prices, market cap, dividends and financials from Yahoo Finance"
+            style={{
+              padding: "8px 14px",
+              borderRadius: 8,
+              border: `1px solid ${colors.border}`,
+              fontFamily: fonts.description,
+              fontSize: 12,
+              color: "#fff",
+              background: colors.clickable,
+              cursor: reseedStatus?.running ? "not-allowed" : "pointer",
+              opacity: reseedStatus?.running ? 0.6 : 1,
+            }}
+          >
+            {reseedStatus?.running ? "Reseeding..." : "Reseed live data"}
+          </button>
+          <button
+            type="button"
+            onClick={handleClearCache}
+            disabled={cacheBusy}
+            title="Force-refresh stock data (market cap, prices, financials) instead of waiting out the cache TTL"
+            style={{
+              padding: "8px 14px",
+              borderRadius: 8,
+              border: `1px solid ${colors.border}`,
+              fontFamily: fonts.description,
+              fontSize: 12,
+              color: colors.darkMenu,
+              background: colors.surface,
+              cursor: cacheBusy ? "not-allowed" : "pointer",
+              opacity: cacheBusy ? 0.6 : 1,
+            }}
+          >
+            {cacheBusy ? "Clearing..." : "Clear data cache"}
+          </button>
+        </div>
+
+        {(cacheMsg || reseedStatus?.running || reseedMsg) && (
+          <div style={{ fontFamily: fonts.description, fontSize: 11, color: colors.mutedText, marginTop: 4 }}>
+            {reseedStatus?.running
+              ? "Pulling fresh data from Yahoo Finance - this can take a few minutes..."
+              : reseedMsg || cacheMsg}
+          </div>
+        )}
+
+        {(reseedStatus?.running || (reseedStatus?.output?.length ?? 0) > 0) && (
+          <pre
+            style={{
+              background: "var(--color-dark-menu)",
+              color: "#d8dee9",
+              borderRadius: 8,
+              padding: "10px 12px",
+              fontSize: 11,
+              lineHeight: 1.5,
+              maxHeight: 160,
+              overflowY: "auto",
+              margin: "12px 0 0",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {reseedStatus.output.join("\n")}
+          </pre>
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 12,
+            background: colors.surface,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+            padding: "12px 16px",
+            marginTop: 16,
+          }}
+        >
+          <div style={{ minWidth: 200 }}>
+            <div style={{ fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel, fontSize: 12, color: colors.mutedText, marginBottom: 2 }}>
+              Auto-reseed
+            </div>
+            <div style={{ fontFamily: fonts.description, fontSize: 13, color: colors.darkMenu }}>
+              {schedule?.intervalHours
+                ? `Every ${
+                    schedule.intervalHours % 24 === 0
+                      ? `${schedule.intervalHours / 24} day${schedule.intervalHours === 24 ? "" : "s"}`
+                      : `${schedule.intervalHours} hour${schedule.intervalHours === 1 ? "" : "s"}`
+                  } - next run ${fmtDateTime(schedule.nextRunAt)}`
+                : "Off - data only refreshes when you click \"Reseed live data\""}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontFamily: fonts.description, fontSize: 12, color: colors.mutedText }}>Every</span>
+            <input
+              type="number"
+              min="1"
+              value={scheduleForm.amount}
+              onChange={(e) => setScheduleForm((prev) => ({ ...prev, amount: Math.max(1, Number(e.target.value) || 1) }))}
+              style={{
+                width: 60,
+                padding: "6px 8px",
+                borderRadius: 6,
+                border: `1px solid ${colors.border}`,
+                fontFamily: fonts.description,
+                fontSize: 12,
+              }}
+            />
+            <select
+              value={scheduleForm.unit}
+              onChange={(e) => setScheduleForm((prev) => ({ ...prev, unit: e.target.value }))}
+              style={{
+                padding: "6px 8px",
+                borderRadius: 6,
+                border: `1px solid ${colors.border}`,
+                fontFamily: fonts.description,
+                fontSize: 12,
+              }}
+            >
+              <option value="hours">hour(s)</option>
+              <option value="days">day(s)</option>
+            </select>
+            <button
+              type="button"
+              onClick={handleSaveSchedule}
+              disabled={scheduleBusy}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 6,
+                border: "none",
+                fontFamily: fonts.description,
+                fontSize: 12,
+                color: "#fff",
+                background: colors.clickable,
+                cursor: scheduleBusy ? "not-allowed" : "pointer",
+                opacity: scheduleBusy ? 0.6 : 1,
+              }}
+            >
+              {schedule?.intervalHours ? "Update" : "Enable"}
+            </button>
+            {schedule?.intervalHours ? (
+              <button
+                type="button"
+                onClick={handleDisableSchedule}
+                disabled={scheduleBusy}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: `1px solid ${colors.border}`,
+                  fontFamily: fonts.description,
+                  fontSize: 12,
+                  color: colors.darkMenu,
+                  background: colors.surface,
+                  cursor: scheduleBusy ? "not-allowed" : "pointer",
+                  opacity: scheduleBusy ? 0.6 : 1,
+                }}
+              >
+                Turn off
+              </button>
+            ) : null}
+          </div>
+
+          {scheduleMsg && (
+            <div style={{ fontFamily: fonts.description, fontSize: 11, color: colors.mutedText, width: "100%" }}>
+              {scheduleMsg}
+            </div>
+          )}
+        </div>
+      </div>
     </section>
   );
 }

@@ -1035,12 +1035,111 @@ a, button {
 .app-topbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 16px;
   height: 64px;
   flex-shrink: 0;
   padding: 0 24px;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
+}
+
+/* Always-present left slot so the account menu stays pinned right even when
+   the ticker is still loading or has no data to show. */
+.app-topbar-left {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Auto-scrolling ticker tape that fills the left side of the top bar. The
+   strip masks its own edges so items fade in/out instead of hard-clipping. */
+.ticker-tape {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+}
+
+.ticker-track {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  /* Duration scales roughly with the (duplicated) content width; 60s reads as
+     an unhurried crawl. Pauses on hover so items stay clickable. */
+  animation: ticker-scroll 60s linear infinite;
+  will-change: transform;
+}
+
+.ticker-tape:hover .ticker-track {
+  animation-play-state: paused;
+}
+
+@keyframes ticker-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    /* -50% because the item list is rendered twice back-to-back. */
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track {
+    animation: none;
+  }
+}
+
+.ticker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: var(--font-title);
+  color: var(--color-text);
+  transition: background 0.15s ease;
+}
+
+.ticker-item:hover {
+  background: var(--color-bg);
+}
+
+.ticker-symbol {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.ticker-price {
+  font-size: 12px;
+  color: var(--color-muted-text);
+}
+
+.ticker-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ticker-change.up {
+  color: var(--color-good);
+}
+
+.ticker-change.down {
+  color: var(--color-bad);
+}
+
+.ticker-change .bi {
+  font-size: 9px;
 }
 
 .app-topbar-login {

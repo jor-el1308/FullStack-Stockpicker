@@ -373,9 +373,9 @@ def main():
                 # Keep-alive/reconnect: this loop can run long enough (dozens
                 # to hundreds of tickers) that a MySQL wait_timeout or a
                 # transient network blip would otherwise kill the whole
-                # remaining run with an unhandled exception. ping(reconnect=True)
-                # transparently reconnects if the connection dropped.
-                conn.ping(reconnect=True)
+                # remaining run with an unhandled exception. ensure_connection
+                # transparently opens a fresh connection if the old one dropped.
+                conn = db.ensure_connection(conn)
                 ok = ingest_one(conn, t)
                 if ok:
                     succeeded += 1

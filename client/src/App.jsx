@@ -9,6 +9,7 @@ import StockDetail from "./pages/StockDetail";
 import Watchlist from "./pages/Watchlist";
 import Admin from "./pages/Admin";
 import Settings from "./pages/Settings";
+import TickerTape from "./components/TickerTape";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ScreenerProvider } from "./context/ScreenerContext";
 import { ThemeProvider } from "./context/ThemeContext";
@@ -117,6 +118,7 @@ function TopBar() {
 
   return (
     <header className="app-topbar">
+      <div className="app-topbar-left">{user ? <TickerTape /> : null}</div>
       {user ? (
         <div className="user-menu">
           <button type="button" className="user-menu-trigger">
