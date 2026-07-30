@@ -43,6 +43,12 @@ export function getStockPrices(exchangeCode, stockCode) {
   return api.get(`/stocks/${exchangeCode}/${stockCode}/prices`);
 }
 
+// GET /api/stocks/ticker — compact feed for the top-bar ticker tape:
+// [{ exchangeCode, stockCode, stockName, currency, price, change, changePct, spark: number[] }]
+export function getTickerTape() {
+  return api.get("/stocks/ticker");
+}
+
 // ---------- Saved screens (criteria sets tied to the logged-in user) ----------
 
 // GET /api/auth/me/criteria-sets — [{ id, name, createdAt, criteria: CriteriaRange[] }]

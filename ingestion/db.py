@@ -46,3 +46,24 @@ def get_connection():
     if config.DB_SSL:
         kwargs["ssl"] = _build_ssl_context()
     return pymysql.connect(**kwargs)
+
+
+def ensure_connection(conn):
+    """Return a live connection, reconnecting if the old one dropped.
+
+    Replaces the deprecated `conn.ping(reconnect=True)`: newer PyMySQL wants
+    you to open a fresh connection rather than reconnect in place. We ping
+    without reconnecting, and if that fails (e.g. MySQL wait_timeout closed
+    the socket during a long ingest run), we build and return a new
+    connection. Callers must use the returned object, e.g.
+    `conn = db.ensure_connection(conn)`.
+    """
+    try:
+        conn.ping(reconnect=False)
+        return conn
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return get_connection()

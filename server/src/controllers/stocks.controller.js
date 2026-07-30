@@ -15,6 +15,15 @@ export async function lookupStocks(req, res) {
   }
 }
 
+export async function getTicker(req, res) {
+  try {
+    const results = await stockLookupService.getTickerTape();
+    res.json({ success: true, data: results });
+  } catch (err) {
+    sendInternalError(res, err, "[stocks] getTicker");
+  }
+}
+
 export async function getStockDetail(req, res) {
   const { exchangeCode, stockCode } = req.params;
   try {
