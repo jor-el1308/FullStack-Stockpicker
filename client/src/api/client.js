@@ -38,5 +38,6 @@ async function request(path, options) {
 export const api = {
   get: (path) => request(path),
   post: (path, body) => request(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
+  patch: (path, body) => request(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined }),
   delete: (path, body) => request(path, { method: "DELETE", body: body ? JSON.stringify(body) : undefined }),
 };

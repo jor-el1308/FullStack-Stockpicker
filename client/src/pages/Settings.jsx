@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../context/ThemeContext";
 import { useAuth } from "../context/AuthContext";
@@ -8,6 +8,9 @@ import {
   resumeSubscription,
   createBillingPortalSession,
   listMyPayments,
+  updateMyProfile,
+  requestEmailChange,
+  verifyEmailChange,
   changeMyPassword,
   deleteMyAccount,
 } from "../api/subscription";
@@ -57,6 +60,83 @@ function initialsOf(name) {
     .toUpperCase();
 }
 
+// Largest square the avatar is downscaled to before upload, and the JPEG
+// quality. 256px keeps the stored data URL small (typically ~15-40KB) while
+// still looking crisp at the sizes we render it (32-96px).
+const AVATAR_MAX_PX = 256;
+const AVATAR_QUALITY = 0.85;
+const AVATAR_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
+
+/**
+ * Reads a chosen image file, downscales it to a centered AVATAR_MAX_PX
+ * square via a canvas, and returns a compressed JPEG data URL. Doing the
+ * resize in the browser means we never upload the multi-MB original - just a
+ * small string that fits comfortably in the JSON body (see app.js) and the
+ * API's size cap (see auth.controller.js avatarDataUrl).
+ * @param {File} file
+ * @returns {Promise<string>} a data:image/jpeg;base64,... URL
+ */
+function fileToAvatarDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const side = Math.min(img.naturalWidth, img.naturalHeight);
+      const sx = (img.naturalWidth - side) / 2;
+      const sy = (img.naturalHeight - side) / 2;
+      const out = Math.min(side, AVATAR_MAX_PX);
+      const canvas = document.createElement("canvas");
+      canvas.width = out;
+      canvas.height = out;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("Could not process image"));
+      // JPEG has no alpha channel - paint white first so transparent areas
+      // (e.g. a PNG logo) come out white rather than black.
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, out, out);
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, out, out);
+      resolve(canvas.toDataURL("image/jpeg", AVATAR_QUALITY));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("That file doesn't look like a valid image."));
+    };
+    img.src = url;
+  });
+}
+
+/**
+ * Circular avatar: shows the uploaded photo when `src` is set, otherwise the
+ * user's initials on the accent background. Shared by the account panel's
+ * view and edit states so both stay visually identical.
+ */
+function Avatar({ src, name, size, fontSize }) {
+  const base = {
+    flex: "0 0 auto",
+    width: size,
+    height: size,
+    borderRadius: "50%",
+    background: "var(--color-clickable)",
+    color: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "var(--font-title)",
+    fontWeight: 600,
+    fontSize,
+    overflow: "hidden",
+  };
+  if (src) {
+    return (
+      <div style={base}>
+        <img src={src} alt={name || "Profile"} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      </div>
+    );
+  }
+  return <div style={base}>{initialsOf(name)}</div>;
+}
+
 /** Big heading + helper text at the top of a panel, with a divider under it. */
 function PanelHeader({ title, help }) {
   return (
@@ -91,7 +171,7 @@ function StatusBadge({ tone, children }) {
 
 export default function Settings() {
   const { theme, toggleTheme } = useTheme();
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
   const isDark = theme === "dark";
 
@@ -187,45 +267,7 @@ export default function Settings() {
           {active === "account" && (
             <div>
               <PanelHeader title="Account" help="Your account details." />
-              <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
-                <div
-                  style={{
-                    flex: "0 0 auto",
-                    width: 96,
-                    height: 96,
-                    borderRadius: "50%",
-                    background: "var(--color-clickable)",
-                    color: "#fff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontFamily: "var(--font-title)",
-                    fontWeight: 600,
-                    fontSize: 34,
-                  }}
-                >
-                  {initialsOf(user?.name)}
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontFamily: "var(--font-title)", fontWeight: 600, fontSize: 18, color: "var(--color-text)" }}>
-                    {user?.name}
-                  </div>
-                  <div
-                    className="settings-row-sub"
-                    title={user?.email}
-                    style={{ marginTop: 2, maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                  >
-                    {user?.email}
-                  </div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
-                    {user?.isAdmin && <StatusBadge tone="admin">Admin</StatusBadge>}
-                    {user?.isActive && <StatusBadge tone="active">Active</StatusBadge>}
-                  </div>
-                </div>
-              </div>
-              {user?.createdAt && (
-                <div className="settings-row-sub" style={{ marginTop: 18 }}>Member since {fmtDate(user.createdAt)}</div>
-              )}
+              <AccountControl user={user} updateUser={updateUser} />
             </div>
           )}
 
@@ -351,6 +393,341 @@ const inputStyle = {
   fontFamily: "var(--font-body)",
   fontSize: 13,
 };
+
+/**
+ * Account panel - shows the avatar/name/email/badges, and (in edit mode) an
+ * inline form to change the display name and login email.
+ *
+ * The name is saved directly (PATCH /auth/me). Changing the email is a
+ * verified two-step flow: saving a new address emails a 6-digit code to that
+ * address (POST /auth/email-change/request), and the panel switches to a
+ * code-entry step that only applies the change once the code checks out
+ * (POST /auth/email-change/verify). Both paths merge the refreshed user into
+ * the shared auth state via updateUser(), so the nav bar and the rest of the
+ * app update without a re-login.
+ */
+function AccountControl({ user, updateUser }) {
+  // "view" | "edit" | "verify-email"
+  const [mode, setMode] = useState("view");
+  const [name, setName] = useState(user?.name ?? "");
+  const [email, setEmail] = useState(user?.email ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState("");
+
+  // Email awaiting code confirmation (set once request() succeeds).
+  const [pendingEmail, setPendingEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [resendMsg, setResendMsg] = useState("");
+
+  // Working copy of the avatar while editing: undefined = unchanged, a data
+  // URL = new photo, null = remove the existing photo.
+  const [avatarDraft, setAvatarDraft] = useState(undefined);
+  const fileInputRef = useRef(null);
+
+  const avatarChanged = avatarDraft !== undefined;
+  // What to show in the edit-mode preview: the draft if touched, else current.
+  const previewAvatar = avatarChanged ? avatarDraft : user?.avatar ?? null;
+
+  function startEditing() {
+    setName(user?.name ?? "");
+    setEmail(user?.email ?? "");
+    setAvatarDraft(undefined);
+    setError("");
+    setDone("");
+    setMode("edit");
+  }
+
+  async function handlePickFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file later
+    if (!file) return;
+    setError("");
+    try {
+      const dataUrl = await fileToAvatarDataUrl(file);
+      setAvatarDraft(dataUrl);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function handleRemovePhoto() {
+    setError("");
+    // Only mark for removal if there's actually a photo to remove; otherwise
+    // just discard any freshly-picked draft.
+    setAvatarDraft(user?.avatar ? null : undefined);
+  }
+
+  function cancelEditing() {
+    setMode("view");
+    setError("");
+    setPendingEmail("");
+    setCode("");
+    setResendMsg("");
+    setAvatarDraft(undefined);
+  }
+
+  const trimmedName = name.trim();
+  const trimmedEmail = email.trim();
+  const nameChanged = trimmedName !== (user?.name ?? "");
+  const emailChanged = trimmedEmail.toLowerCase() !== (user?.email ?? "").toLowerCase();
+  const changed = nameChanged || emailChanged || avatarChanged;
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    setDone("");
+    if (!trimmedName) {
+      setError("Name can't be empty.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      // Name and photo are safe to apply immediately - no verification needed.
+      if (nameChanged || avatarChanged) {
+        const patch = {};
+        if (nameChanged) patch.name = trimmedName;
+        if (avatarChanged) patch.avatar = avatarDraft; // data URL, or null to remove
+        const updated = await updateMyProfile(patch);
+        updateUser(updated);
+        setAvatarDraft(undefined);
+      }
+
+      if (emailChanged) {
+        // Kicks off email verification; the change itself lands in step 2.
+        const { email: sentTo } = await requestEmailChange(trimmedEmail);
+        setPendingEmail(sentTo);
+        setCode("");
+        setResendMsg("");
+        setMode("verify-email");
+      } else {
+        setMode("view");
+        setDone("Profile updated.");
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleVerify(e) {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      const updated = await verifyEmailChange(pendingEmail, code.trim());
+      updateUser(updated);
+      setMode("view");
+      setPendingEmail("");
+      setCode("");
+      setDone("Email updated.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResend() {
+    setError("");
+    setResendMsg("");
+    setBusy(true);
+    try {
+      await requestEmailChange(pendingEmail);
+      setResendMsg("A new code is on its way.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 20, alignItems: mode === "edit" ? "flex-start" : "center" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+          {mode === "edit" ? (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              title="Upload a new photo"
+              style={{ position: "relative", border: "none", background: "none", padding: 0, cursor: "pointer", lineHeight: 0 }}
+            >
+              <Avatar src={previewAvatar} name={user?.name} size={96} fontSize={34} />
+              <span
+                style={{
+                  position: "absolute",
+                  right: 0,
+                  bottom: 0,
+                  width: 30,
+                  height: 30,
+                  borderRadius: "50%",
+                  background: "var(--color-clickable)",
+                  border: "2px solid var(--color-surface)",
+                  color: "#fff",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 14,
+                }}
+              >
+                <i className="bi bi-camera-fill" />
+              </span>
+            </button>
+          ) : (
+            <Avatar src={user?.avatar} name={user?.name} size={96} fontSize={34} />
+          )}
+
+          {mode === "edit" && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                style={{ border: "none", background: "none", padding: 0, cursor: "pointer", color: "var(--color-clickable)", fontFamily: "var(--font-body)", fontSize: 12 }}
+              >
+                {previewAvatar ? "Change photo" : "Upload photo"}
+              </button>
+              {previewAvatar && (
+                <button
+                  type="button"
+                  onClick={handleRemovePhoto}
+                  style={{ border: "none", background: "none", padding: 0, cursor: "pointer", color: "var(--color-bad)", fontFamily: "var(--font-body)", fontSize: 12 }}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={AVATAR_ACCEPT}
+            onChange={handlePickFile}
+            style={{ display: "none" }}
+          />
+        </div>
+
+        {mode === "edit" && (
+          <form onSubmit={handleSubmit} style={{ flex: "1 1 auto", minWidth: 0 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div>
+                <label className="settings-row-sub" style={{ display: "block", marginBottom: 4 }}>Name</label>
+                <input
+                  type="text"
+                  autoComplete="name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Your name"
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label className="settings-row-sub" style={{ display: "block", marginBottom: 4 }}>Email</label>
+                <input
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  style={inputStyle}
+                />
+                {emailChanged && (
+                  <div className="settings-row-sub" style={{ marginTop: 4 }}>
+                    We'll email a code to this address to verify it before switching.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {error && <div className="settings-row-sub" style={{ color: "var(--color-bad)", marginTop: 10 }}>{error}</div>}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <button type="submit" className="btn btn-primary" disabled={busy || !changed}>
+                {busy ? "Saving…" : emailChanged ? "Save & verify email" : "Save changes"}
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={cancelEditing} disabled={busy}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        {mode === "verify-email" && (
+          <form onSubmit={handleVerify} style={{ flex: "1 1 auto", minWidth: 0 }}>
+            <div className="settings-row-sub" style={{ marginBottom: 10 }}>
+              Enter the 6-digit code we sent to <strong style={{ color: "var(--color-text)" }}>{pendingEmail}</strong> to
+              confirm it as your new email.
+            </div>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+              placeholder="123456"
+              autoFocus
+              style={{ ...inputStyle, letterSpacing: "0.3em", fontFamily: "var(--font-numeric)" }}
+            />
+
+            {error && <div className="settings-row-sub" style={{ color: "var(--color-bad)", marginTop: 10 }}>{error}</div>}
+            {resendMsg && (
+              <div className="settings-row-sub" style={{ color: "var(--color-good)", marginTop: 10 }}>{resendMsg}</div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+              <button type="submit" className="btn btn-primary" disabled={busy || code.length !== 6}>
+                {busy ? "Verifying…" : "Verify email"}
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={handleResend} disabled={busy}>
+                Resend code
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={cancelEditing} disabled={busy}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        {mode === "view" && (
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: "var(--font-title)", fontWeight: 600, fontSize: 18, color: "var(--color-text)" }}>
+              {user?.name}
+            </div>
+            <div
+              className="settings-row-sub"
+              title={user?.email}
+              style={{ marginTop: 2, maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+            >
+              {user?.email}
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+              {user?.isAdmin && <StatusBadge tone="admin">Admin</StatusBadge>}
+              {user?.isActive && <StatusBadge tone="active">Active</StatusBadge>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {mode === "view" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
+          <button type="button" className="btn btn-secondary" onClick={startEditing}>
+            <i className="bi bi-pencil" />
+            Edit profile
+          </button>
+          {done && <span className="settings-row-sub" style={{ color: "var(--color-good)" }}>{done}</span>}
+        </div>
+      )}
+
+      {mode === "view" && user?.createdAt && (
+        <div className="settings-row-sub" style={{ marginTop: 14 }}>Member since {fmtDate(user.createdAt)}</div>
+      )}
+    </div>
+  );
+}
 
 /**
  * "Change password" control - verifies the current password server-side, so

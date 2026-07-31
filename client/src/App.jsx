@@ -116,18 +116,32 @@ function TopBar() {
         .toUpperCase()
     : "?";
 
+  // Show the uploaded profile picture in the avatar circle when set,
+  // otherwise the initials. The <img> fills the existing circular span
+  // (overflow clipped inline since the base class doesn't hide it).
+  const avatarContent = user?.avatar ? (
+    <img
+      src={user.avatar}
+      alt={user.name || "Profile"}
+      style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }}
+    />
+  ) : (
+    initials
+  );
+  const avatarClip = { overflow: "hidden", padding: 0 };
+
   return (
     <header className="app-topbar">
       <div className="app-topbar-left">{user ? <TickerTape /> : null}</div>
       {user ? (
         <div className="user-menu">
           <button type="button" className="user-menu-trigger">
-            <span className="user-menu-avatar">{initials}</span>
+            <span className="user-menu-avatar" style={user?.avatar ? avatarClip : undefined}>{avatarContent}</span>
             <i className="bi bi-chevron-down" />
           </button>
           <div className="user-menu-dropdown">
             <div className="user-menu-header">
-              <span className="user-menu-avatar-lg">{initials}</span>
+              <span className="user-menu-avatar-lg" style={user?.avatar ? avatarClip : undefined}>{avatarContent}</span>
               <div style={{ minWidth: 0 }}>
                 <div className="user-menu-name-row">
                   <span className="user-menu-name">{user.name}</span>

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import * as authService from "../services/auth.service.js";
-import { sendOtpEmail } from "../utils/mailer.js";
+import { sendOtpEmail, sendEmailChangeOtpEmail } from "../utils/mailer.js";
 import { parseDurationMs } from "../config/jwt.js";
 import { sendInternalError } from "../utils/errors.js";
 
@@ -65,6 +65,37 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8, "New password must be at least 8 characters"),
 });
 
+// Profile picture, stored inline as a resized/compressed data URL. The
+// client caps the real size by resizing to a small square before upload;
+// this is the server-side backstop (format + a generous length ceiling that
+// stays under the express.json body limit in app.js). `null` clears it.
+const avatarDataUrl = z
+  .string()
+  .max(2_000_000, "Image is too large - please choose a smaller one")
+  .regex(/^data:image\/(png|jpe?g|webp|gif);base64,/, "Unsupported image format");
+
+// Profile edit via PATCH /me covers the display name and profile picture.
+// Changing the login email is a separate, verified two-step flow
+// (email-change/request + email-change/verify) since the new address has to
+// be proven first. Both fields optional, but at least one must be present.
+const updateProfileSchema = z
+  .object({
+    name: z.string().min(1).max(128).optional(),
+    avatar: avatarDataUrl.nullable().optional(),
+  })
+  .refine((body) => body.name !== undefined || "avatar" in body, {
+    message: "Nothing to update",
+  });
+
+const requestEmailChangeSchema = z.object({
+  email: z.string().email(),
+});
+
+const verifyEmailChangeSchema = z.object({
+  email: z.string().email(),
+  code: z.string().length(6, "Code must be 6 digits"),
+});
+
 const SESSION_COOKIE = "token";
 
 /**
@@ -91,6 +122,7 @@ function toAuthUser(user) {
     id: user.id,
     email: user.email,
     name: user.name,
+    avatar: user.avatar ?? null,
     createdAt: user.createdAt,
     isActive: Boolean(user.isActive),
     activatedAt: user.activatedAt ?? null,
@@ -260,6 +292,121 @@ export async function getProfile(req, res) {
     res.json({ success: true, data: toAuthUser(user) });
   } catch (err) {
     sendInternalError(res, err, "[auth] getProfile");
+  }
+}
+
+/**
+ * Updates the logged-in user's own display name and/or profile picture.
+ * Changing the login email is handled separately (requestEmailChange/
+ * verifyEmailChange below) because it needs the new address verified first.
+ * An explicit `avatar: null` removes the current photo. Returns the refreshed
+ * public user so the client can update its cached auth state in place (no
+ * re-login needed).
+ */
+export async function updateProfile(req, res) {
+  const parsed = updateProfileSchema.safeParse(req.body);
+  if (!parsed.success) return badRequest(res, parsed);
+
+  const patch = {};
+  if (parsed.data.name !== undefined) patch.name = parsed.data.name;
+  if ("avatar" in parsed.data) patch.avatar = parsed.data.avatar ?? null;
+
+  try {
+    const user = await authService.updateProfile(req.userId, patch);
+    if (!user) {
+      return res.status(404).json({ success: false, error: { message: "User not found" } });
+    }
+    res.json({ success: true, data: toAuthUser(user) });
+  } catch (err) {
+    sendInternalError(res, err, "[auth] updateProfile");
+  }
+}
+
+/**
+ * Step 1 of changing the login email: validates the requested address (well
+ * formed, actually different, not already taken by another account), then
+ * emails a one-time code to *that new address* to prove the user controls
+ * it. Nothing on the account changes yet - the email only moves in step 2,
+ * verifyEmailChange(), once the code comes back. Deliberately does not reveal
+ * whether a colliding address belongs to someone else beyond the same 409
+ * wording signup() uses.
+ */
+export async function requestEmailChange(req, res) {
+  const parsed = requestEmailChangeSchema.safeParse(req.body);
+  if (!parsed.success) return badRequest(res, parsed);
+  const email = parsed.data.email.trim().toLowerCase();
+
+  try {
+    const me = await authService.findUserById(req.userId);
+    if (!me) {
+      return res.status(404).json({ success: false, error: { message: "User not found" } });
+    }
+    if (email === me.email.toLowerCase()) {
+      return res
+        .status(400)
+        .json({ success: false, error: { message: "That's already your email address" } });
+    }
+
+    const existing = await authService.findUserByEmail(email);
+    if (existing && existing.id !== req.userId) {
+      return res
+        .status(409)
+        .json({ success: false, error: { message: "An account with this email already exists" } });
+    }
+
+    const code = await authService.createEmailChangeOtp(req.userId, email);
+    const result = await sendEmailChangeOtpEmail({ to: email, name: me.name, code });
+    if (result.error) {
+      return res
+        .status(500)
+        .json({ success: false, error: { message: "Could not send verification code - please try again" } });
+    }
+
+    res.json({ success: true, data: { pending: true, email } });
+  } catch (err) {
+    sendInternalError(res, err, "[auth] requestEmailChange");
+  }
+}
+
+/**
+ * Step 2 of changing the login email: checks the code emailed to the pending
+ * address and, on success, writes that address onto the account. The
+ * uniqueness re-check + ER_DUP_ENTRY handling guard the race where someone
+ * else claims the same address between step 1 and step 2. Returns the
+ * refreshed public user so the client updates in place, no re-login needed.
+ */
+export async function verifyEmailChange(req, res) {
+  const parsed = verifyEmailChangeSchema.safeParse(req.body);
+  if (!parsed.success) return badRequest(res, parsed);
+  const email = parsed.data.email.trim().toLowerCase();
+
+  try {
+    const ok = await authService.verifyEmailChangeOtp(req.userId, email, parsed.data.code);
+    if (!ok) {
+      return res.status(401).json({ success: false, error: { message: "Incorrect or expired code" } });
+    }
+
+    // Re-check uniqueness at the last moment - the address could have been
+    // taken since the code was requested.
+    const existing = await authService.findUserByEmail(email);
+    if (existing && existing.id !== req.userId) {
+      return res
+        .status(409)
+        .json({ success: false, error: { message: "An account with this email already exists" } });
+    }
+
+    const user = await authService.updateProfile(req.userId, { email });
+    if (!user) {
+      return res.status(404).json({ success: false, error: { message: "User not found" } });
+    }
+    res.json({ success: true, data: toAuthUser(user) });
+  } catch (err) {
+    if (err.code === "ER_DUP_ENTRY") {
+      return res
+        .status(409)
+        .json({ success: false, error: { message: "An account with this email already exists" } });
+    }
+    sendInternalError(res, err, "[auth] verifyEmailChange");
   }
 }
 

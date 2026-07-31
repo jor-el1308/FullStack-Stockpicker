@@ -70,6 +70,20 @@ const statCard = {
 const statLabel = { fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel, fontSize: 12, color: colors.mutedText, marginBottom: 4 };
 const statValue = { fontFamily: fonts.numeric, fontWeight: fontWeights.numeric, fontSize: 22, color: colors.darkMenu };
 
+// Status filters for the user table. `test` runs against a single user row.
+// "Active"/"Inactive" reflect the paywall flag (is_active); "Paid"/"Not paid"
+// reflect whether any payment exists - deliberately separate, since an admin
+// can grant access (Restore) without the user ever paying, so "active" and
+// "paid" aren't the same thing. Single-select, combined with the search box.
+const USER_FILTERS = [
+  { id: "all", label: "All", test: () => true },
+  { id: "active", label: "Active", test: (u) => u.isActive },
+  { id: "inactive", label: "Inactive", test: (u) => !u.isActive },
+  { id: "paid", label: "Paid", test: (u) => Number(u.paymentCount) > 0 },
+  { id: "unpaid", label: "Not paid", test: (u) => Number(u.paymentCount) === 0 },
+  { id: "admin", label: "Admins", test: (u) => u.isAdmin },
+];
+
 function Badge({ good, children }) {
   return (
     <span
@@ -129,6 +143,7 @@ export default function Admin() {
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [expandedId, setExpandedId] = useState(null);
   const [paymentsByUser, setPaymentsByUser] = useState({});
   const [cacheBusy, setCacheBusy] = useState(false);
@@ -157,11 +172,25 @@ export default function Admin() {
 
   useEffect(load, []);
 
-  const filteredUsers = useMemo(() => {
+  // Narrow by the search box first; the status-filter pill counts are then
+  // computed against that searched set, so a count reflects what you'd
+  // actually see after clicking it.
+  const searchedUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return users;
     return users.filter((u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
   }, [users, search]);
+
+  const filterCounts = useMemo(() => {
+    const counts = {};
+    for (const f of USER_FILTERS) counts[f.id] = searchedUsers.filter(f.test).length;
+    return counts;
+  }, [searchedUsers]);
+
+  const filteredUsers = useMemo(() => {
+    const active = USER_FILTERS.find((f) => f.id === statusFilter) ?? USER_FILTERS[0];
+    return searchedUsers.filter(active.test);
+  }, [searchedUsers, statusFilter]);
 
   async function handleToggleActive(row) {
     setBusyId(row.id);
@@ -520,13 +549,39 @@ export default function Admin() {
           width: "100%",
           maxWidth: 320,
           padding: "8px 12px",
-          marginBottom: 16,
+          marginBottom: 12,
           borderRadius: 8,
           border: `1px solid ${colors.border}`,
           fontFamily: fonts.description,
           fontSize: 13,
         }}
       />
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        {USER_FILTERS.map((f) => {
+          const selected = statusFilter === f.id;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setStatusFilter(f.id)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 999,
+                border: `1px solid ${selected ? colors.clickable : colors.border}`,
+                fontFamily: fonts.description,
+                fontSize: 12,
+                color: selected ? "#fff" : colors.darkMenu,
+                background: selected ? colors.clickable : colors.surface,
+                cursor: "pointer",
+              }}
+            >
+              {f.label}
+              <span style={{ marginLeft: 6, opacity: 0.75, fontFamily: fonts.numeric }}>{filterCounts[f.id] ?? 0}</span>
+            </button>
+          );
+        })}
+      </div>
 
       {loading && <p style={{ fontFamily: fonts.description, color: colors.mutedText }}>Loading users...</p>}
 
@@ -667,7 +722,10 @@ export default function Admin() {
 
       {!loading && filteredUsers.length === 0 && (
         <p style={{ fontFamily: fonts.description, color: colors.mutedText, fontSize: 13 }}>
-          No users match "{search}".
+          {(() => {
+            const label = statusFilter === "all" ? "" : USER_FILTERS.find((f) => f.id === statusFilter)?.label.toLowerCase() + " ";
+            return search.trim() ? `No ${label}users match "${search}".` : `No ${label}users.`;
+          })()}
         </p>
       )}
 
@@ -721,6 +779,13 @@ export default function Admin() {
           >
             {cacheBusy ? "Clearing..." : "Clear data cache"}
           </button>
+        </div>
+
+        <div style={{ fontFamily: fonts.description, fontSize: 12, color: colors.mutedText, marginTop: 10 }}>
+          Last reseeded:{" "}
+          <span style={{ color: colors.darkMenu, fontFamily: fonts.numeric }}>
+            {schedule?.lastReseedAt ? fmtDateTime(schedule.lastReseedAt) : "Never"}
+          </span>
         </div>
 
         {(cacheMsg || reseedStatus?.running || reseedMsg) && (
