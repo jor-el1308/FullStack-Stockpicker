@@ -107,6 +107,11 @@ CREATE TABLE IF NOT EXISTS users (
   email         VARCHAR(255) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   name          VARCHAR(128) NOT NULL,
+  -- Profile picture (Person 1), stored inline as a resized/compressed data
+  -- URL so there's no separate file store. NULL = no photo set, UI falls
+  -- back to initials. Size is capped in the API + by the client resize; see
+  -- migration 009 and auth.controller.js updateProfileSchema.
+  avatar        LONGTEXT NULL DEFAULT NULL,
   -- Subscription/paywall (Person 2): new accounts start inactive and must
   -- subscribe (monthly, recurring) before accessing anything past login.
   -- `is_active` mirrors whether the Stripe subscription is currently
@@ -176,6 +181,23 @@ CREATE TABLE IF NOT EXISTS login_otp (
     REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- Owner: Person 1 - added for verifying a changed login email. Same shape as
+-- login_otp, plus `new_email`: the code is emailed to the pending address to
+-- prove the user controls it, and that address only lands on the users row
+-- once the matching code is confirmed (see auth.service.js). Codes are
+-- stored hashed (bcrypt), never in plaintext.
+CREATE TABLE IF NOT EXISTS email_change_otp (
+  id           CHAR(36) PRIMARY KEY DEFAULT (UUID()),
+  user_id      CHAR(36) NOT NULL,
+  new_email    VARCHAR(255) NOT NULL,
+  code_hash    VARCHAR(255) NOT NULL,
+  expires_at   TIMESTAMP NOT NULL,
+  consumed_at  TIMESTAMP NULL DEFAULT NULL,
+  created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_email_change_otp_user FOREIGN KEY (user_id)
+    REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS saved_criteria_set (
   id         CHAR(36) PRIMARY KEY DEFAULT (UUID()),
   user_id    CHAR(36) NOT NULL,
@@ -235,5 +257,9 @@ CREATE TABLE IF NOT EXISTS reseed_schedule (
   id             TINYINT PRIMARY KEY DEFAULT 1,
   interval_hours INT NULL,      -- NULL = auto-reseed disabled
   next_run_at_ms BIGINT NULL,   -- epoch ms of the next scheduled run; NULL when disabled
+  -- epoch ms of the last successful reseed (manual or scheduled), so the
+  -- admin panel can show when the data was last refreshed. NULL until the
+  -- first successful run. See ingestion.service.js.
+  last_reseed_at_ms BIGINT NULL DEFAULT NULL,
   updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;

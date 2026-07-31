@@ -101,6 +101,10 @@ export function startReseed(options = {}) {
     state.running = false;
     state.exitCode = code;
     state.finishedAt = new Date().toISOString();
+    // Only a clean exit (0) counts as an actual data refresh worth stamping
+    // as the "last reseeded" time - a crashed/failed run left the data as it
+    // was.
+    if (code === 0) recordSuccessfulReseed();
     scheduleNextRunAfterCompletion();
   });
 
@@ -135,11 +139,30 @@ export function getReseedStatus() {
  * MySQL's session timezone.
  */
 const SCHEDULE_TICK_MS = 60_000;
-let scheduleCache = { intervalHours: null, nextRunAtMs: null };
+let scheduleCache = { intervalHours: null, nextRunAtMs: null, lastReseedAtMs: null };
 let schedulerStarted = false;
 
 function msFromHours(hours) {
   return hours * 60 * 60 * 1000;
+}
+
+/**
+ * Stamps "now" as the last successful reseed time, in memory and persisted
+ * to reseed_schedule (row id = 1, upserted so it exists even when auto-reseed
+ * was never configured). Called on every clean reseed completion, whether it
+ * was triggered manually or by the scheduler.
+ */
+function recordSuccessfulReseed() {
+  const lastReseedAtMs = Date.now();
+  scheduleCache = { ...scheduleCache, lastReseedAtMs };
+  pool
+    .query(
+      `INSERT INTO reseed_schedule (id, last_reseed_at_ms)
+       VALUES (1, ?)
+       ON DUPLICATE KEY UPDATE last_reseed_at_ms = VALUES(last_reseed_at_ms)`,
+      [lastReseedAtMs]
+    )
+    .catch((err) => console.error("[ingestion] failed to persist last reseed time:", err.message));
 }
 
 /**
@@ -180,12 +203,13 @@ function checkSchedule() {
 export async function initReseedScheduler() {
   try {
     const [rows] = await pool.query(
-      "SELECT interval_hours AS intervalHours, next_run_at_ms AS nextRunAtMs FROM reseed_schedule WHERE id = 1"
+      "SELECT interval_hours AS intervalHours, next_run_at_ms AS nextRunAtMs, last_reseed_at_ms AS lastReseedAtMs FROM reseed_schedule WHERE id = 1"
     );
     const row = rows[0];
     scheduleCache = {
       intervalHours: row?.intervalHours ?? null,
       nextRunAtMs: row?.nextRunAtMs != null ? Number(row.nextRunAtMs) : null,
+      lastReseedAtMs: row?.lastReseedAtMs != null ? Number(row.lastReseedAtMs) : null,
     };
   } catch (err) {
     console.error("[ingestion] failed to load reseed schedule, auto-reseed stays off until next change:", err.message);
@@ -198,12 +222,13 @@ export async function initReseedScheduler() {
 }
 
 /**
- * @returns {{intervalHours: ?number, nextRunAt: ?string}}
+ * @returns {{intervalHours: ?number, nextRunAt: ?string, lastReseedAt: ?string}}
  */
 export function getReseedSchedule() {
   return {
     intervalHours: scheduleCache.intervalHours,
     nextRunAt: scheduleCache.nextRunAtMs != null ? new Date(scheduleCache.nextRunAtMs).toISOString() : null,
+    lastReseedAt: scheduleCache.lastReseedAtMs != null ? new Date(scheduleCache.lastReseedAtMs).toISOString() : null,
   };
 }
 
@@ -222,6 +247,6 @@ export async function setReseedSchedule(intervalHours) {
     [normalized, nextRunAtMs]
   );
 
-  scheduleCache = { intervalHours: normalized, nextRunAtMs };
+  scheduleCache = { ...scheduleCache, intervalHours: normalized, nextRunAtMs };
   return getReseedSchedule();
 }

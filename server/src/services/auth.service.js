@@ -136,7 +136,7 @@ export async function verifyLoginOtp(userId, code) {
  */
 export async function findUserByEmail(email) {
   const [rows] = await pool.query(
-    `SELECT id, email, password_hash AS passwordHash, name, created_at AS createdAt,
+    `SELECT id, email, password_hash AS passwordHash, name, avatar, created_at AS createdAt,
             is_active AS isActive, activated_at AS activatedAt, is_admin AS isAdmin
      FROM users WHERE email = ? LIMIT 1`,
     [email]
@@ -149,7 +149,7 @@ export async function findUserByEmail(email) {
  */
 export async function findUserById(id) {
   const [rows] = await pool.query(
-    `SELECT id, email, name, created_at AS createdAt, is_active AS isActive,
+    `SELECT id, email, name, avatar, created_at AS createdAt, is_active AS isActive,
             activated_at AS activatedAt, is_admin AS isAdmin
      FROM users WHERE id = ? LIMIT 1`,
     [id]
@@ -199,6 +199,96 @@ export async function findAuthById(id) {
 export async function updatePassword(userId, newPassword) {
   const passwordHash = await hashPassword(newPassword);
   await pool.query(`UPDATE users SET password_hash = ? WHERE id = ?`, [passwordHash, userId]);
+}
+
+/**
+ * Emails a 6-digit code to a *pending* new address to prove the user
+ * controls it before it becomes their login email. Same hashed-storage +
+ * single-live-code pattern as createLoginOtp(), in a separate table that
+ * also remembers which new_email the code was issued for, so verification
+ * can only ever apply the exact address the code was sent to.
+ * @param {string} userId
+ * @param {string} newEmail
+ * @returns {Promise<string>} the raw 6-digit code, to be emailed immediately - never persisted in plaintext
+ */
+export async function createEmailChangeOtp(userId, newEmail) {
+  const code = String(randomInt(100000, 1000000));
+  const codeHash = await bcrypt.hash(code, SALT_ROUNDS);
+
+  await pool.query(`DELETE FROM email_change_otp WHERE user_id = ? AND consumed_at IS NULL`, [userId]);
+  await pool.query(
+    `INSERT INTO email_change_otp (id, user_id, new_email, code_hash, expires_at)
+     VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
+    [randomUUID(), userId, newEmail, codeHash, OTP_EXPIRY_MINUTES]
+  );
+
+  return code;
+}
+
+/**
+ * Confirms an email-change code against the most recent unconsumed,
+ * unexpired code for this user AND that exact pending address, and marks it
+ * consumed on a match so it can't be replayed. The address is matched too
+ * (not just the code) so a code issued for one address can never be used to
+ * confirm a different one.
+ * @param {string} userId
+ * @param {string} newEmail
+ * @param {string} code
+ * @returns {Promise<boolean>}
+ */
+export async function verifyEmailChangeOtp(userId, newEmail, code) {
+  const [rows] = await pool.query(
+    `SELECT id, code_hash AS codeHash FROM email_change_otp
+     WHERE user_id = ? AND new_email = ? AND consumed_at IS NULL AND expires_at > NOW()
+     ORDER BY created_at DESC LIMIT 1`,
+    [userId, newEmail]
+  );
+  const otp = rows[0];
+  if (!otp) return false;
+
+  const matches = await bcrypt.compare(code, otp.codeHash);
+  if (!matches) return false;
+
+  await pool.query(`UPDATE email_change_otp SET consumed_at = NOW() WHERE id = ?`, [otp.id]);
+  return true;
+}
+
+/**
+ * Updates the logged-in user's own profile (display name and/or login
+ * email). Only the fields present in `patch` are written, so the caller can
+ * send just a name change without touching the email. Email uniqueness is
+ * enforced by the DB's UNIQUE constraint - the controller turns the
+ * resulting ER_DUP_ENTRY into a friendly 409, same as signup(). Note the
+ * email path here is internal-only: it runs *after* verifyEmailChangeOtp()
+ * has proven ownership of the new address (see auth.controller.js).
+ *
+ * `avatar` may be a data-URL string (set/replace the photo) or null (remove
+ * it and fall back to initials in the UI). It's the one field where an
+ * explicit null is meaningful, hence the `in` check rather than `!== undefined`.
+ * @param {string} userId
+ * @param {{ name?: string, email?: string, avatar?: string | null }} patch
+ * @returns {Promise<object|null>} the refreshed public user
+ */
+export async function updateProfile(userId, patch) {
+  const fields = [];
+  const values = [];
+  if (patch.name !== undefined) {
+    fields.push("name = ?");
+    values.push(patch.name);
+  }
+  if (patch.email !== undefined) {
+    fields.push("email = ?");
+    values.push(patch.email);
+  }
+  if ("avatar" in patch) {
+    fields.push("avatar = ?");
+    values.push(patch.avatar ?? null);
+  }
+  if (fields.length > 0) {
+    values.push(userId);
+    await pool.query(`UPDATE users SET ${fields.join(", ")} WHERE id = ?`, values);
+  }
+  return findUserById(userId);
 }
 
 /**

@@ -30,7 +30,11 @@ export function createApp() {
   // object express.json() would otherwise leave here.
   app.post("/api/subscription/webhook", express.raw({ type: "application/json" }), stripeWebhook);
 
-  app.use(express.json());
+  // Bumped above the 100kb default so a profile-picture data URL (PATCH
+  // /api/auth/me - resized/compressed client-side, but still a base64 image
+  // string) fits in the request body. The API-level cap in auth.controller.js
+  // (avatarDataUrl) keeps the actual avatar well under this ceiling.
+  app.use(express.json({ limit: "3mb" }));
 
   app.get("/api/health", (_req, res) => {
     res.json({ success: true, data: { status: "ok" } });

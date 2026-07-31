@@ -123,12 +123,17 @@ export async function sendWelcomeEmail({ to, name }) {
 const OTP_EXPIRY_MINUTES = 10;
 
 /**
- * HTML for the login 2FA code email - same branded shell as the welcome
- * email, with the 6-digit code as the focal point instead of a CTA button.
+ * HTML for a one-time-code email - same branded shell as the welcome email,
+ * with the 6-digit code as the focal point instead of a CTA button. The
+ * intro/footer wording is parameterised so the same layout serves both the
+ * login 2FA code and the "verify your new email" code.
  */
-function otpEmailHtml({ name, code }) {
+function otpEmailHtml({ name, code, intro, footer }) {
   const safeName = String(name).replace(/</g, "&lt;");
   const safeCode = String(code).replace(/[^0-9]/g, "");
+  const introText =
+    intro ?? `Hi ${safeName}, use this code to finish logging in to Stock Screener. It expires in ${OTP_EXPIRY_MINUTES} minutes.`;
+  const footerText = footer ?? "If you didn't try to log in, you can safely ignore this email.";
 
   return `<!doctype html>
 <html>
@@ -151,11 +156,11 @@ function otpEmailHtml({ name, code }) {
               <td style="padding:36px 32px;">
                 <h1 style="margin:0 0 12px; font-family:'Inter',Arial,sans-serif; font-weight:600; font-size:22px; color:#0a1628;">Your verification code</h1>
                 <p style="margin:0 0 24px; font-family:'Inter',Arial,sans-serif; font-size:14px; line-height:1.6; color:rgba(10,22,40,0.75);">
-                  Hi ${safeName}, use this code to finish logging in to Stock Screener. It expires in ${OTP_EXPIRY_MINUTES} minutes.
+                  ${introText}
                 </p>
                 <div style="margin:0 0 24px; padding:16px 24px; background:#f4f7fc; border-radius:8px; text-align:center; font-family:'Roboto Mono',monospace; font-weight:600; font-size:32px; letter-spacing:0.3em; color:#0a1628;">${safeCode}</div>
                 <p style="margin:0; font-family:'Inter',Arial,sans-serif; font-size:12px; color:rgba(10,22,40,0.5);">
-                  If you didn't try to log in, you can safely ignore this email.
+                  ${footerText}
                 </p>
               </td>
             </tr>
@@ -197,6 +202,43 @@ export async function sendOtpEmail({ to, name, code }) {
     return { sent: true };
   } catch (err) {
     console.error("[mailer] Failed to send login code email:", err.message);
+    return { sent: false, error: err.message };
+  }
+}
+
+/**
+ * Sends the code that verifies a *new* login email before it replaces the
+ * account's current one. Deliberately delivered to the pending new address
+ * (not the current one) - receiving it is the proof of ownership. Same
+ * SMTP-not-configured fallback as sendOtpEmail(): logs the raw code so local
+ * dev can complete the flow without a real mail provider.
+ *
+ * @param {{ to: string, name: string, code: string }} params - `to` is the NEW email
+ */
+export async function sendEmailChangeOtpEmail({ to, name, code }) {
+  const transporter = getTransporter();
+  const safeName = String(name).replace(/</g, "&lt;");
+  const intro = `Hi ${safeName}, use this code to confirm ${to} as the new email for your Stock Screener account. It expires in ${OTP_EXPIRY_MINUTES} minutes.`;
+  const footer = "If you didn't request an email change, you can safely ignore this email - your account is unchanged.";
+
+  if (!transporter) {
+    console.warn(
+      `[mailer] SMTP not configured (see server/.env.example) - email-change code for ${to} is: ${code}`
+    );
+    return { sent: false };
+  }
+
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || `"Stock Screener" <${process.env.SMTP_USER}>`,
+      to,
+      subject: `Confirm your new Stock Screener email: ${code}`,
+      html: otpEmailHtml({ name, code, intro, footer }),
+      text: `Use code ${code} to confirm ${to} as the new email for your Stock Screener account. It expires in ${OTP_EXPIRY_MINUTES} minutes.`,
+    });
+    return { sent: true };
+  } catch (err) {
+    console.error("[mailer] Failed to send email-change code email:", err.message);
     return { sent: false, error: err.message };
   }
 }

@@ -31,6 +31,28 @@ export function createBillingPortalSession() {
   return api.post("/subscription/billing-portal");
 }
 
+// Updates the logged-in user's own display name and/or profile picture.
+// Pass only what changed, e.g. { name } or { avatar } (a data-URL image, or
+// null to remove the photo). Returns the refreshed public user. Email
+// changes go through the verified two-step flow below. See
+// server/src/controllers/auth.controller.js updateProfile().
+export function updateMyProfile(patch) {
+  return api.patch("/auth/me", patch);
+}
+
+// Step 1 of changing the login email: emails a 6-digit code to the NEW
+// address to verify the user controls it. Nothing changes on the account
+// until verifyEmailChange() confirms the code. See auth.controller.js.
+export function requestEmailChange(email) {
+  return api.post("/auth/email-change/request", { email });
+}
+
+// Step 2: confirms the code emailed to the new address and applies the email
+// change. Returns the refreshed public user. See auth.controller.js.
+export function verifyEmailChange(email, code) {
+  return api.post("/auth/email-change/verify", { email, code });
+}
+
 // Changes the logged-in user's password. Re-confirms the current password
 // (checked server-side). See server/src/controllers/auth.controller.js.
 export function changeMyPassword(currentPassword, newPassword) {
