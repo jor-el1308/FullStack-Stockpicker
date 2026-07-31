@@ -84,6 +84,27 @@ const USER_FILTERS = [
   { id: "admin", label: "Admins", test: (u) => u.isAdmin },
 ];
 
+/**
+ * A clickable table header that sorts the user table by `sortKey`. Shows a
+ * ▲/▼ arrow on the active column and a faint neutral ↕ on the rest so it's
+ * clear every one of these is sortable.
+ */
+function SortableTh({ label, sortKey, sort, onSort }) {
+  const active = sort.key === sortKey;
+  return (
+    <th
+      style={{ ...th, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}
+      onClick={() => onSort(sortKey)}
+      title={`Sort by ${label.toLowerCase()}`}
+    >
+      {label}
+      <span style={{ marginLeft: 5, fontSize: 10, opacity: active ? 1 : 0.3 }}>
+        {active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
+      </span>
+    </th>
+  );
+}
+
 function Badge({ good, children }) {
   return (
     <span
@@ -144,6 +165,9 @@ export default function Admin() {
   const [busyId, setBusyId] = useState(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  // Column sort. Defaults to newest-first (createdAt desc), matching the
+  // order the API already returns rows in.
+  const [sort, setSort] = useState({ key: "createdAt", dir: "desc" });
   const [expandedId, setExpandedId] = useState(null);
   const [paymentsByUser, setPaymentsByUser] = useState({});
   const [cacheBusy, setCacheBusy] = useState(false);
@@ -191,6 +215,35 @@ export default function Admin() {
     const active = USER_FILTERS.find((f) => f.id === statusFilter) ?? USER_FILTERS[0];
     return searchedUsers.filter(active.test);
   }, [searchedUsers, statusFilter]);
+
+  // Sort a copy (never mutate the memoized filter result). Payments sort
+  // numerically, Joined by timestamp, everything else case-insensitively.
+  const sortedUsers = useMemo(() => {
+    const mult = sort.dir === "asc" ? 1 : -1;
+    const valueOf = (u) => {
+      if (sort.key === "paymentCount") return Number(u.paymentCount);
+      if (sort.key === "createdAt") return new Date(u.createdAt).getTime();
+      return (u[sort.key] ?? "").toString().toLowerCase();
+    };
+    return [...filteredUsers].sort((a, b) => {
+      const av = valueOf(a);
+      const bv = valueOf(b);
+      if (av < bv) return -1 * mult;
+      if (av > bv) return 1 * mult;
+      return 0;
+    });
+  }, [filteredUsers, sort]);
+
+  // Toggle direction when re-clicking the active column; otherwise switch to
+  // the new column with a sensible default (newest/biggest first for
+  // date/number columns, A-Z for text).
+  function toggleSort(key) {
+    setSort((prev) => {
+      if (prev.key === key) return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
+      const numericOrDate = key === "paymentCount" || key === "createdAt";
+      return { key, dir: numericOrDate ? "desc" : "asc" };
+    });
+  }
 
   async function handleToggleActive(row) {
     setBusyId(row.id);
@@ -596,17 +649,17 @@ export default function Admin() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                <th style={th}>Name</th>
-                <th style={th}>Email</th>
+                <SortableTh label="Name" sortKey="name" sort={sort} onSort={toggleSort} />
+                <SortableTh label="Email" sortKey="email" sort={sort} onSort={toggleSort} />
                 <th style={th}>Status</th>
                 <th style={th}>Role</th>
-                <th style={th}>Payments</th>
-                <th style={th}>Joined</th>
+                <SortableTh label="Payments" sortKey="paymentCount" sort={sort} onSort={toggleSort} />
+                <SortableTh label="Joined" sortKey="createdAt" sort={sort} onSort={toggleSort} />
                 <th style={th}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filteredUsers.map((row) => {
+              {sortedUsers.map((row) => {
                 const isSelf = row.id === currentUser?.id;
                 const busy = busyId === row.id;
                 const isExpanded = expandedId === row.id;
