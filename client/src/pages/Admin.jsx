@@ -105,6 +105,43 @@ function SortableTh({ label, sortKey, sort, onSort }) {
   );
 }
 
+function initialsOf(name) {
+  if (!name) return "?";
+  return name.trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+}
+
+/**
+ * Small circular avatar for the user table - the uploaded profile picture
+ * when set, otherwise initials on the accent background. Mirrors the larger
+ * avatar in Settings so the same user reads the same everywhere.
+ */
+function TableAvatar({ src, name }) {
+  const base = {
+    flexShrink: 0,
+    width: 28,
+    height: 28,
+    borderRadius: "50%",
+    background: colors.clickable,
+    color: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: fonts.titleLabel,
+    fontWeight: fontWeights.titleLabel,
+    fontSize: 11,
+    overflow: "hidden",
+  };
+  return (
+    <span style={base}>
+      {src ? (
+        <img src={src} alt={name || "Profile"} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      ) : (
+        initialsOf(name)
+      )}
+    </span>
+  );
+}
+
 function Badge({ good, children }) {
   return (
     <span
@@ -667,7 +704,12 @@ export default function Admin() {
                 return (
                   <Fragment key={row.id}>
                     <tr>
-                      <td style={td}>{row.name}</td>
+                      <td style={td}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <TableAvatar src={row.avatar} name={row.name} />
+                          {row.name}
+                        </span>
+                      </td>
                       <td style={td} className="numeric">{row.email}</td>
                       <td style={td}>
                         <Badge good={row.isActive}>{row.isActive ? "Active" : "Inactive"}</Badge>

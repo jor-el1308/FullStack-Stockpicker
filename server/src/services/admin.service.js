@@ -20,7 +20,7 @@ import * as subscriptionService from "./subscription.service.js";
 export async function listUsers() {
   const [rows] = await pool.query(
     `SELECT
-       u.id, u.email, u.name, u.is_active AS isActive, u.activated_at AS activatedAt,
+       u.id, u.email, u.name, u.avatar, u.is_active AS isActive, u.activated_at AS activatedAt,
        u.is_admin AS isAdmin, u.created_at AS createdAt,
        COUNT(p.id) AS paymentCount
      FROM users u
