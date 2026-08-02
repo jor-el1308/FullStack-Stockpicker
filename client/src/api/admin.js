@@ -10,6 +10,11 @@ export function listUsers() {
   return api.get("/admin/users");
 }
 
+// Admin-provisioned account. payload: { email, password, name, isActive?, isAdmin? }
+export function createUser(payload) {
+  return api.post("/admin/users", payload);
+}
+
 export function revokeUser(userId) {
   return api.post(`/admin/users/${userId}/revoke`);
 }

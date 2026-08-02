@@ -21,6 +21,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import {
   listUsers,
+  createUser,
   revokeUser,
   restoreUser,
   deleteUser,
@@ -193,6 +194,159 @@ function PaymentsPanel({ payments, loading, error }) {
   );
 }
 
+/**
+ * Modal form for admin-provisioned account creation (the "Create" of the
+ * admin CRUD). Name/email/password mirror the public signup fields; the two
+ * checkboxes expose what only an admin can set - granting access immediately
+ * (skipping the paywall) and making the new account an admin. On success it
+ * hands the created user row back to onCreated() so the table updates without
+ * a refetch.
+ */
+function CreateUserModal({ onClose, onCreated }) {
+  const [form, setForm] = useState({ name: "", email: "", password: "", isActive: false, isAdmin: false });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  function set(key, value) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    if (form.password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const created = await createUser({
+        name: form.name.trim(),
+        email: form.email.trim(),
+        password: form.password,
+        isActive: form.isActive,
+        isAdmin: form.isAdmin,
+      });
+      onCreated(created);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  const field = {
+    width: "100%",
+    padding: "9px 12px",
+    borderRadius: 6,
+    border: `1px solid ${colors.border}`,
+    fontFamily: fonts.description,
+    fontSize: 13,
+    boxSizing: "border-box",
+  };
+  const label = { fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel, fontSize: 12, color: colors.mutedText, display: "block", marginBottom: 4 };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(10, 22, 40, 0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        zIndex: 1000,
+      }}
+    >
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={handleSubmit}
+        style={{
+          width: "100%",
+          maxWidth: 440,
+          background: colors.surface,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 12,
+          padding: 24,
+        }}
+      >
+        <h2 style={{ fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel, fontSize: 18, margin: "0 0 4px", color: colors.darkMenu }}>
+          Create user
+        </h2>
+        <p style={{ fontFamily: fonts.description, fontSize: 13, color: colors.mutedText, margin: "0 0 18px" }}>
+          Provision a new account directly. Leave both toggles off for a normal inactive account, same as a public sign-up.
+        </p>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <label style={label}>Name</label>
+            <input type="text" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Jane Tan" required style={field} />
+          </div>
+          <div>
+            <label style={label}>Email</label>
+            <input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="jane@example.com" required style={field} />
+          </div>
+          <div>
+            <label style={label}>Password</label>
+            <input type="password" value={form.password} onChange={(e) => set("password", e.target.value)} placeholder="At least 8 characters" autoComplete="new-password" style={field} />
+          </div>
+
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: fonts.description, fontSize: 13, color: colors.darkMenu, cursor: "pointer" }}>
+            <input type="checkbox" checked={form.isActive} onChange={(e) => set("isActive", e.target.checked)} />
+            Grant access immediately (skip the paywall)
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: fonts.description, fontSize: 13, color: colors.darkMenu, cursor: "pointer" }}>
+            <input type="checkbox" checked={form.isAdmin} onChange={(e) => set("isAdmin", e.target.checked)} />
+            Make this account an admin
+          </label>
+        </div>
+
+        {error && (
+          <div style={{ fontFamily: fonts.description, fontSize: 12, color: colors.badNumber, marginTop: 12 }}>{error}</div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 8,
+              border: `1px solid ${colors.border}`,
+              fontFamily: fonts.description,
+              fontSize: 12,
+              color: colors.darkMenu,
+              background: colors.surface,
+              cursor: busy ? "not-allowed" : "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy || !form.name.trim() || !form.email.trim() || !form.password}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 8,
+              border: "none",
+              fontFamily: fonts.description,
+              fontSize: 12,
+              color: "#fff",
+              background: colors.clickable,
+              cursor: busy || !form.name.trim() || !form.email.trim() || !form.password ? "not-allowed" : "pointer",
+              opacity: busy || !form.name.trim() || !form.email.trim() || !form.password ? 0.6 : 1,
+            }}
+          >
+            {busy ? "Creating…" : "Create user"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 export default function Admin() {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState([]);
@@ -200,6 +354,7 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   // Column sort. Defaults to newest-first (createdAt desc), matching the
@@ -280,6 +435,23 @@ export default function Admin() {
       const numericOrDate = key === "paymentCount" || key === "createdAt";
       return { key, dir: numericOrDate ? "desc" : "asc" };
     });
+  }
+
+  // Prepend the freshly-created account to the table and reflect it in the
+  // stat cards, so it shows up immediately without a full refetch.
+  function handleCreated(created) {
+    setUsers((prev) => [created, ...prev]);
+    setStats((prev) =>
+      prev
+        ? {
+            ...prev,
+            totalUsers: prev.totalUsers + 1,
+            activeUsers: prev.activeUsers + (created.isActive ? 1 : 0),
+            inactiveUsers: prev.inactiveUsers + (created.isActive ? 0 : 1),
+          }
+        : prev
+    );
+    setShowCreate(false);
   }
 
   async function handleToggleActive(row) {
@@ -543,6 +715,23 @@ export default function Admin() {
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => setShowCreate(true)}
+              title="Provision a new user account directly"
+              style={{
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: "none",
+                fontFamily: fonts.description,
+                fontSize: 12,
+                color: "#fff",
+                background: colors.clickable,
+                cursor: "pointer",
+              }}
+            >
+              + Create user
+            </button>
             <button
               type="button"
               onClick={() => handleExport("users")}
@@ -1016,6 +1205,8 @@ export default function Admin() {
           )}
         </div>
       </div>
+
+      {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} onCreated={handleCreated} />}
     </section>
   );
 }
