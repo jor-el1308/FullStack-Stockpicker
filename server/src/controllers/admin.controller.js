@@ -1,8 +1,20 @@
+import { z } from "zod";
 import * as adminService from "../services/admin.service.js";
 import * as ingestionService from "../services/ingestion.service.js";
 import { toCsv } from "../utils/csv.js";
 import { buildAdminSummaryPdf } from "../utils/pdfReport.js";
 import { sendInternalError } from "../utils/errors.js";
+
+// Same core rules as auth.controller.js's signupSchema (email/password/name),
+// plus the two admin-only flags. Both default off, so a bare create makes an
+// inactive, non-admin account exactly like public signup.
+const createUserSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  name: z.string().min(1).max(128),
+  isActive: z.boolean().optional(),
+  isAdmin: z.boolean().optional(),
+});
 
 /**
  * Owner: Person 2 (Charles) - Admin Dashboard.
@@ -25,6 +37,28 @@ export async function getStats(_req, res) {
     res.json({ success: true, data: stats });
   } catch (err) {
     sendInternalError(res, err, "[admin] getStats");
+  }
+}
+
+export async function createUser(req, res) {
+  const parsed = createUserSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ success: false, error: { message: parsed.error.issues[0]?.message ?? "Invalid input" } });
+  }
+  try {
+    const user = await adminService.createUser(parsed.data);
+    res.status(201).json({ success: true, data: user });
+  } catch (err) {
+    // Email column is UNIQUE - a clash comes back as ER_DUP_ENTRY. Same
+    // friendly 409 as auth.controller.js's signup().
+    if (err.code === "ER_DUP_ENTRY") {
+      return res
+        .status(409)
+        .json({ success: false, error: { message: "An account with this email already exists" } });
+    }
+    sendInternalError(res, err, "[admin] createUser");
   }
 }
 

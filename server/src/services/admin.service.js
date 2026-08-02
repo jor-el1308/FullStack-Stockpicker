@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { pool } from "../config/db.js";
 import { cacheClear, cacheSize } from "../utils/cache.js";
 import * as subscriptionService from "./subscription.service.js";
+import * as authService from "./auth.service.js";
 
 /**
  * Owner: Person 2 (Charles) - Admin Dashboard.
@@ -29,6 +31,39 @@ export async function listUsers() {
      ORDER BY u.created_at DESC`
   );
   return rows.map((row) => ({ ...row, isActive: Boolean(row.isActive), isAdmin: Boolean(row.isAdmin) }));
+}
+
+/**
+ * Admin-side account creation (the "Create" of the admin CRUD). Mirrors
+ * authService.createUser() - same UUID id + bcrypt hash (reused, so an
+ * admin-made account logs in identically to a self-signed-up one) - but adds
+ * two things a public signup can't set: is_active and is_admin. That lets an
+ * admin provision an already-active account (skipping the paywall) or another
+ * admin directly, instead of creating it and then flipping the flags in two
+ * more clicks.
+ *
+ * activated_at is stamped only when isActive is true, matching restoreUser()'s
+ * convention so an admin-granted account doesn't look never-activated.
+ *
+ * The email UNIQUE constraint surfaces as ER_DUP_ENTRY, which the controller
+ * turns into a friendly 409 (same as signup()). Returns the created user
+ * shaped like a listUsers() row (with avatar/paymentCount) so the dashboard
+ * can prepend it to the table without a refetch.
+ *
+ * @param {{ email: string, password: string, name: string, isActive?: boolean, isAdmin?: boolean }} input
+ */
+export async function createUser({ email, password, name, isActive = false, isAdmin = false }) {
+  const id = randomUUID();
+  const passwordHash = await authService.hashPassword(password);
+  await pool.query(
+    `INSERT INTO users (id, email, password_hash, name, is_active, is_admin, activated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ${isActive ? "NOW()" : "NULL"})`,
+    [id, email, passwordHash, name, isActive ? 1 : 0, isAdmin ? 1 : 0]
+  );
+  const user = await getUser(id);
+  // A brand-new account has no photo and no payments yet - fill these so the
+  // returned row matches listUsers()' shape (getUser() selects neither).
+  return { ...user, avatar: null, paymentCount: 0 };
 }
 
 /**

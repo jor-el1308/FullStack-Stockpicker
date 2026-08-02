@@ -17,6 +17,7 @@ router.use(requireAuth, requireAdmin);
 
 router.get("/stats", adminController.getStats);
 router.get("/users", adminController.listUsers);
+router.post("/users", adminController.createUser); // admin-provisioned account; body: { email, password, name, isActive?, isAdmin? }
 router.post("/users/:id/revoke", adminController.revokeUser);
 router.post("/users/:id/restore", adminController.restoreUser);
 router.delete("/users/:id", adminController.deleteUser); // hard-delete (irreversible) - keeps anonymized payment rows
