@@ -14,5 +14,7 @@ router.use(requireAuth, requireActiveAccount);
 
 router.post("/analyze", aiController.analyzeStocks);
 router.get("/history", aiController.getAiHistory);
+router.patch("/history/:id", aiController.updateAiHistoryEntry);
+router.delete("/history/:id", aiController.deleteAiHistoryEntry);
 
 export default router;

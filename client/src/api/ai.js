@@ -11,8 +11,20 @@ export function analyzeStocks(stocks) {
 }
 
 // GET /api/ai/history — the logged-in user's past AI analysis runs
-// (latest first), each with the stocks that were analyzed, the resulting
-// text, and when it was run. Backs the AiHistory page.
+// (latest first), each with a title, the stocks that were analyzed, the
+// resulting text, and when it was run. Backs the AiHistory page.
 export function getAiHistory() {
     return api.get("/ai/history");
+}
+
+// PATCH /api/ai/history/:id — rename a run and/or overwrite its analysis
+// text (user annotations/corrections, not a re-run of the model). Pass only
+// the fields being changed, e.g. { title } or { analysisText }.
+export function updateAiHistoryEntry(id, patch) {
+    return api.patch(`/ai/history/${id}`, patch);
+}
+
+// DELETE /api/ai/history/:id — permanently removes one past analysis run.
+export function deleteAiHistoryEntry(id) {
+    return api.delete(`/ai/history/${id}`);
 }

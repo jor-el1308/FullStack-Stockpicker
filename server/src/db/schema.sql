@@ -270,9 +270,16 @@ CREATE TABLE IF NOT EXISTS reseed_schedule (
 CREATE TABLE IF NOT EXISTS ai_analysis (
   id            CHAR(36) PRIMARY KEY DEFAULT (UUID()),
   user_id       CHAR(36) NOT NULL,
+  -- User-facing label for the run - auto-generated from the shortlisted
+  -- stock codes when the analysis is saved, renameable afterwards from the
+  -- AiHistory page (PATCH /api/ai/history/:id).
+  title         VARCHAR(200) NOT NULL,
   -- The shortlisted stocks sent to the model, kept so the history page can
   -- show what was analyzed without re-joining against live screener data.
   stocks        JSON NOT NULL,
+  -- Editable after the fact (PATCH /api/ai/history/:id) so users can
+  -- annotate or correct the model's write-up - this is not re-derived from
+  -- the model on edit, it's just user-owned text from that point on.
   analysis_text MEDIUMTEXT NOT NULL,
   created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_ai_analysis_user FOREIGN KEY (user_id)
