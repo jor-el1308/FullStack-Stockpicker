@@ -15,6 +15,35 @@ import { GoogleGenAI } from "@google/genai";
 
 const MODEL = "gemini-flash-latest";
 
+// Model tiers selectable from Settings -> AI preferences (ai_preferences.ai_model_tier).
+// Only "flash" is actually wired up to a live provider right now - the other
+// two are placeholders (real model names, no API integration written yet) so
+// the preference UI/DB/env plumbing exists ahead of those providers being
+// implemented. See server/.env.example for the placeholder key names.
+const MODEL_TIERS = {
+    flash: { label: "Gemini Flash" },
+    "gpt-4o-mini": { label: "GPT-4o mini", envKey: "OPENAI_API_KEY" },
+    "claude-haiku": { label: "Claude Haiku", envKey: "ANTHROPIC_API_KEY" },
+};
+
+const PERSONAS = {
+    balanced: "a balanced, even-handed financial analyst who weighs growth potential and risk equally",
+    conservative:
+        "a conservative, risk-averse financial analyst who prioritizes capital preservation and stability, and is quick to flag downside risk over growth potential",
+    growth:
+        "a growth-focused financial analyst who prioritizes revenue/earnings momentum and future upside, even where that comes with more volatility",
+    income:
+        "an income-focused financial analyst who prioritizes dividend yield and payout stability over capital growth",
+};
+
+/**
+ * Thrown by getQualitativeAnalysis() when the caller's preferred model tier
+ * isn't backed by a real provider integration yet (see MODEL_TIERS above) -
+ * the controller maps this to a 400 (user-fixable: pick a different tier)
+ * rather than a generic 500.
+ */
+export class ModelTierUnavailableError extends Error {}
+
 function getClient() {
     const key = process.env.AI_RECOMMENDATION_API_KEY;
     if (!key) {
@@ -28,8 +57,15 @@ function getClient() {
 
 /**
  * @param {Array<{exchangeCode: string, stockCode: string, stockName: string, values?: Record<string, number>}>} stocks
+ * @param {{aiPersona?: string, aiDetailLevel?: string, customInstructions?: string}} [preferences]
+ *   From ai_preferences (see aiPreferences.service.js) - steers the persona
+ *   the write-up is framed as, how much detail to include, and any free-text
+ *   instructions the user added on top. Falls back to the same defaults as
+ *   the ai_preferences table (balanced/concise/none) when omitted.
  */
-function buildPrompt(stocks) {
+function buildPrompt(stocks, preferences = {}) {
+    const { aiPersona = "balanced", aiDetailLevel = "concise", customInstructions = "" } = preferences;
+
     const list = stocks
         .map((s) => {
             const metrics = s.values
@@ -41,15 +77,24 @@ function buildPrompt(stocks) {
         })
         .join("\n");
 
-    return `You are a financial analyst assistant helping a retail investor review a shortlist of stocks that just passed their screener criteria.
+    const personaDescription = PERSONAS[aiPersona] ?? PERSONAS.balanced;
+    const detailInstruction =
+        aiDetailLevel === "detailed"
+            ? "Be thorough: 5-7 sentences per stock, covering more nuance in your reasoning."
+            : "Keep each stock's write-up to 3-4 sentences.";
+    const customInstructionsBlock = customInstructions.trim()
+        ? `\nThe user also gave these additional instructions - follow them as long as they don't conflict with anything above:\n${customInstructions.trim()}\n`
+        : "";
 
-For EACH stock below, give a short qualitative take covering:
+    return `You are ${personaDescription}, helping a retail investor review a shortlist of stocks that just passed their screener criteria.
+
+For EACH stock below, give a qualitative take covering:
 1. Recent news / context you're aware of (if none, say so - don't invent facts)
 2. Growth outlook (brief)
-3. 1-2 sentences of reasoning tying it back to the screener metrics given
+3. 1-2 sentences of reasoning tying it back to the screener metrics given, viewed through your persona's priorities above
 
-Keep each stock's write-up to 3-4 sentences. End with a one-line disclaimer that this is not financial advice.
-
+${detailInstruction} End with a one-line disclaimer that this is not financial advice.
+${customInstructionsBlock}
 Respond in plain text only, no markdown or HTML. Do not use asterisks, underscores, backticks, or "#" headers for formatting. Use a stock's name followed by a colon to start each write-up, and a plain line breaks between stocks.
 
 Shortlisted stocks:
@@ -87,11 +132,22 @@ function stripMarkdown(text) {
 
 /**
  * @param {Array<{exchangeCode: string, stockCode: string, stockName: string, values?: Record<string, number>}>} stocks
+ * @param {{aiModelTier?: string, aiPersona?: string, aiDetailLevel?: string, customInstructions?: string}} [preferences]
+ *   The caller's saved ai_preferences row (see aiPreferences.service.js).
  * @returns {Promise<string>} plain-text analysis
  */
-export async function getQualitativeAnalysis(stocks) {
+export async function getQualitativeAnalysis(stocks, preferences = {}) {
+    const { aiModelTier = "flash" } = preferences;
+    const tier = MODEL_TIERS[aiModelTier] ?? MODEL_TIERS.flash;
+    if (aiModelTier !== "flash") {
+        throw new ModelTierUnavailableError(
+            `${tier.label} isn't wired up yet - only Gemini Flash is implemented right now. ` +
+            `Switch back to Gemini Flash in Settings -> AI preferences to run an analysis.`
+        );
+    }
+
     const client = getClient();
-    const prompt = buildPrompt(stocks);
+    const prompt = buildPrompt(stocks, preferences);
 
     const response = await client.models.generateContent({
         model: MODEL,

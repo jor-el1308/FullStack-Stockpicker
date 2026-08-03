@@ -5,7 +5,7 @@
  * cost bounded) before calling out to the AI provider.
  */
 import { z } from "zod";
-import { getQualitativeAnalysis } from "../services/ai.service.js";
+import { getQualitativeAnalysis, ModelTierUnavailableError } from "../services/ai.service.js";
 import {
     saveAiAnalysis,
     listAiAnalysisHistory,
@@ -13,6 +13,7 @@ import {
     deleteAiAnalysis,
     AiAnalysisNotFoundError,
 } from "../services/aiHistory.service.js";
+import { getAiPreferences } from "../services/aiPreferences.service.js";
 
 const stockSchema = z.object({
     exchangeCode: z.string().min(1),
@@ -47,7 +48,8 @@ export async function analyzeStocks(req, res) {
     }
 
     try {
-        const analysis = await getQualitativeAnalysis(parsed.data.stocks);
+        const preferences = await getAiPreferences(req.userId);
+        const analysis = await getQualitativeAnalysis(parsed.data.stocks, preferences);
         try {
             await saveAiAnalysis(req.userId, parsed.data.stocks, analysis);
         } catch (err) {
@@ -57,6 +59,9 @@ export async function analyzeStocks(req, res) {
         }
         return res.json({ success: true, data: { analysis } });
     } catch (err) {
+        if (err instanceof ModelTierUnavailableError) {
+            return res.status(400).json({ success: false, error: { message: err.message } });
+        }
         console.error("[ai] analyzeStocks failed:", err.message);
         return res.status(500).json({
             success: false,

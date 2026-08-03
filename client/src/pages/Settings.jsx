@@ -14,6 +14,7 @@ import {
   changeMyPassword,
   deleteMyAccount,
 } from "../api/subscription";
+import { getAiPreferences, updateAiPreferences } from "../api/aiPreferences";
 
 /**
  * Account settings (Person 2 - Subscription/Paywall).
@@ -29,6 +30,7 @@ import {
 const TABS = [
   { id: "account", label: "Account", icon: "bi-person" },
   { id: "appearance", label: "Appearance", icon: "bi-palette" },
+  { id: "ai-preferences", label: "AI preferences", icon: "bi-robot" },
   { id: "password", label: "Password", icon: "bi-shield-lock" },
   { id: "subscription", label: "Subscription", icon: "bi-star" },
   { id: "billing", label: "Billing history", icon: "bi-receipt" },
@@ -286,6 +288,16 @@ export default function Settings() {
                 />
                 <i className="bi bi-moon-stars theme-toggle-icon" />
               </div>
+            </div>
+          )}
+
+          {active === "ai-preferences" && (
+            <div>
+              <PanelHeader
+                title="AI preferences"
+                help="Choose the model, analyst persona, and level of detail used when the AI reviews your shortlisted stocks."
+              />
+              <AiPreferencesControl />
             </div>
           )}
 
@@ -811,6 +823,211 @@ function ChangePasswordControl() {
         </button>
       </div>
     </form>
+  );
+}
+
+// Model tiers selectable in the AI preferences panel. Only "flash" is wired
+// up to a real provider today (server/src/services/ai.service.js) - the
+// other two are placeholder model names reserved for when that integration
+// is built (see server/.env.example's OPENAI_API_KEY/ANTHROPIC_API_KEY).
+const AI_MODEL_OPTIONS = [
+  { id: "flash", label: "Gemini Flash", description: "Google's Gemini model - fast, and the only model actually wired up to run analysis right now." },
+  { id: "gpt-4o-mini", label: "GPT-4o mini", description: "Placeholder - not yet connected. Selecting this saves your preference, but analysis still needs Gemini Flash for now." },
+  { id: "claude-haiku", label: "Claude Haiku", description: "Placeholder - not yet connected. Selecting this saves your preference, but analysis still needs Gemini Flash for now." },
+];
+
+const AI_PERSONA_OPTIONS = [
+  { id: "balanced", label: "Balanced", description: "Weighs growth potential and risk evenly - a neutral, well-rounded take on each stock." },
+  { id: "conservative", label: "Conservative", description: "Prioritizes stability and capital preservation, quick to flag downside risk over growth potential." },
+  { id: "growth", label: "Growth", description: "Focuses on momentum and future upside, even where that means more volatility." },
+  { id: "income", label: "Income & dividends", description: "Emphasizes dividend yield and payout stability over capital growth." },
+];
+
+const AI_DETAIL_OPTIONS = [
+  { id: "concise", label: "Concise", description: "Short, to-the-point write-ups (3-4 sentences per stock)." },
+  { id: "detailed", label: "Detailed", description: "Longer write-ups with extra nuance and reasoning (5-7 sentences per stock)." },
+];
+
+const CUSTOM_INSTRUCTIONS_MAX = 1000;
+
+/**
+ * One selectable option in the AI preferences panel: a radio input plus a
+ * label and short description, the description doubling as a native
+ * tooltip (title attr) and always-visible helper text so users can compare
+ * options before picking one.
+ */
+function OptionCard({ name, id, label, description, checked, onSelect }) {
+  return (
+    <label
+      title={description}
+      style={{
+        display: "flex",
+        gap: 10,
+        alignItems: "flex-start",
+        padding: "10px 12px",
+        border: `1px solid ${checked ? "var(--color-clickable)" : "var(--color-border)"}`,
+        borderRadius: 8,
+        cursor: "pointer",
+        background: checked ? "var(--color-surface)" : "transparent",
+      }}
+    >
+      <input
+        type="radio"
+        name={name}
+        checked={checked}
+        onChange={() => onSelect(id)}
+        style={{ marginTop: 3, flex: "0 0 auto" }}
+      />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontFamily: "var(--font-title)", fontWeight: 600, fontSize: 13, color: "var(--color-text)" }}>
+          {label}
+        </div>
+        <div className="settings-row-sub" style={{ marginTop: 2 }}>{description}</div>
+      </div>
+    </label>
+  );
+}
+
+/**
+ * "AI preferences" control - lets a user choose the model tier, analyst
+ * persona, and output detail level used by the AI stock analysis feature
+ * (ai.service.js), plus free-text custom instructions. Backed by
+ * GET/PATCH /api/ai/preferences (ai_preferences table, one row per user).
+ *
+ * `loaded` holds the last-saved values, `draft` the in-progress edits - the
+ * Save button is only enabled once they diverge, same "changed" idiom as
+ * AccountControl above.
+ */
+function AiPreferencesControl() {
+  const [loaded, setLoaded] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    getAiPreferences()
+      .then((prefs) => {
+        setLoaded(prefs);
+        setDraft(prefs);
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  function update(patch) {
+    setDraft((d) => ({ ...d, ...patch }));
+    setSaved(false);
+  }
+
+  const changed =
+    !!loaded &&
+    !!draft &&
+    (loaded.aiModelTier !== draft.aiModelTier ||
+      loaded.aiPersona !== draft.aiPersona ||
+      loaded.aiDetailLevel !== draft.aiDetailLevel ||
+      (loaded.customInstructions ?? "") !== (draft.customInstructions ?? ""));
+
+  async function handleSave() {
+    setBusy(true);
+    setError("");
+    try {
+      const next = await updateAiPreferences({
+        aiModelTier: draft.aiModelTier,
+        aiPersona: draft.aiPersona,
+        aiDetailLevel: draft.aiDetailLevel,
+        customInstructions: draft.customInstructions ?? "",
+      });
+      setLoaded(next);
+      setDraft(next);
+      setSaved(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (loading) return <div className="settings-row-sub">Loading…</div>;
+  if (!draft) return <div className="settings-row-sub" style={{ color: "var(--color-bad)" }}>{error}</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      <div>
+        <div className="settings-row-label" style={{ marginBottom: 8 }}>AI model</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 460 }}>
+          {AI_MODEL_OPTIONS.map((opt) => (
+            <OptionCard
+              key={opt.id}
+              name="ai-model"
+              {...opt}
+              checked={draft.aiModelTier === opt.id}
+              onSelect={(id) => update({ aiModelTier: id })}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="settings-row-label" style={{ marginBottom: 8 }}>Analyst persona</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 460 }}>
+          {AI_PERSONA_OPTIONS.map((opt) => (
+            <OptionCard
+              key={opt.id}
+              name="ai-persona"
+              {...opt}
+              checked={draft.aiPersona === opt.id}
+              onSelect={(id) => update({ aiPersona: id })}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="settings-row-label" style={{ marginBottom: 8 }}>Output detail</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 460 }}>
+          {AI_DETAIL_OPTIONS.map((opt) => (
+            <OptionCard
+              key={opt.id}
+              name="ai-detail"
+              {...opt}
+              checked={draft.aiDetailLevel === opt.id}
+              onSelect={(id) => update({ aiDetailLevel: id })}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <label className="settings-row-label" style={{ display: "block", marginBottom: 4 }}>
+          Custom instructions
+        </label>
+        <div className="settings-row-sub" style={{ marginBottom: 6 }}>
+          Optional - tell the AI anything else to keep in mind, e.g. "Focus on ASX-listed stocks" or "explain like I'm
+          new to investing".
+        </div>
+        <textarea
+          value={draft.customInstructions ?? ""}
+          onChange={(e) => update({ customInstructions: e.target.value.slice(0, CUSTOM_INSTRUCTIONS_MAX) })}
+          placeholder="e.g. Favor long-term dividend stability over short-term momentum."
+          rows={4}
+          style={{ ...inputStyle, maxWidth: 460, resize: "vertical" }}
+        />
+        <div className="settings-row-sub" style={{ marginTop: 4, maxWidth: 460, textAlign: "right" }}>
+          {(draft.customInstructions ?? "").length}/{CUSTOM_INSTRUCTIONS_MAX}
+        </div>
+      </div>
+
+      {error && <div className="settings-row-sub" style={{ color: "var(--color-bad)" }}>{error}</div>}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button type="button" className="btn btn-primary" disabled={busy || !changed} onClick={handleSave}>
+          {busy ? "Saving…" : "Save changes"}
+        </button>
+        {saved && !changed && <span className="settings-row-sub" style={{ color: "var(--color-good)" }}>Saved.</span>}
+      </div>
+    </div>
   );
 }
 

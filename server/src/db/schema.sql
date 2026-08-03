@@ -286,3 +286,21 @@ CREATE TABLE IF NOT EXISTS ai_analysis (
     REFERENCES users (id) ON DELETE CASCADE,
   INDEX idx_ai_analysis_user_created (user_id, created_at)
 ) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------------
+-- AI Preferences (Person 1) - one row per user, read by ai.service.js to
+-- steer model/persona/output-length choices for the AI analysis feature.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ai_preferences (
+  user_id             CHAR(36) PRIMARY KEY,
+  ai_model_tier       VARCHAR(32) NOT NULL DEFAULT 'flash',
+  ai_persona          VARCHAR(32) NOT NULL DEFAULT 'balanced',
+  ai_detail_level     VARCHAR(16) NOT NULL DEFAULT 'concise',
+  -- Free-text steering the user can add on top of persona/detail level,
+  -- e.g. "focus on ASX-listed stocks". Optional, so NULL/empty is valid.
+  custom_instructions VARCHAR(1000) NULL,
+  created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ai_preferences_user FOREIGN KEY (user_id)
+    REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB;
