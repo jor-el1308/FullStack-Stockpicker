@@ -534,6 +534,39 @@ a, button {
   color: #8a6f24;
 }
 
+/* Togglable per-stock tabs on the AI Analysis History page */
+.ai-history-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ai-history-tab {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-family: var(--font-title);
+  font-size: 12px;
+  color: var(--color-muted-text);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.ai-history-tab:hover {
+  color: var(--color-text);
+}
+
+.ai-history-tab.active {
+  border-color: var(--color-clickable);
+  background: rgba(26, 92, 158, 0.08);
+  color: var(--color-clickable);
+  font-weight: 600;
+}
+
 /* Stats strip (Saved Screens / Advanced Filters summary) */
 .stat-grid {
   display: grid;

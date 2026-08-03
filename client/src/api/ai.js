@@ -9,3 +9,10 @@ import { api } from "./client";
 export function analyzeStocks(stocks) {
     return api.post("/ai/analyze", { stocks });
 }
+
+// GET /api/ai/history — the logged-in user's past AI analysis runs
+// (latest first), each with the stocks that were analyzed, the resulting
+// text, and when it was run. Backs the AiHistory page.
+export function getAiHistory() {
+    return api.get("/ai/history");
+}

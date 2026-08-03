@@ -6,6 +6,7 @@ import AdvancedFilters from "./pages/AdvancedFilters";
 import SavedScreens from "./pages/SavedScreens";
 import Dashboard from "./pages/Dashboard";
 import StockDetail from "./pages/StockDetail";
+import AiHistory from "./pages/AiHistory";
 import Watchlist from "./pages/Watchlist";
 import Admin from "./pages/Admin";
 import Settings from "./pages/Settings";
@@ -53,6 +54,10 @@ function Sidebar() {
           <NavLink to="/saved" className={sidebarLinkClass}>
             <i className="bi bi-bookmark" />
             <span>Saved Screens</span>
+          </NavLink>
+          <NavLink to="/ai-history" className={sidebarLinkClass}>
+            <i className="bi bi-clock-history" />
+            <span>AI History</span>
           </NavLink>
         </div>
 
@@ -254,6 +259,14 @@ function AppLayout() {
         element={
           <RequireActive>
             <StockDetail />
+          </RequireActive>
+        }
+      />
+      <Route
+        path="/ai-history"
+        element={
+          <RequireActive>
+            <AiHistory />
           </RequireActive>
         }
       />

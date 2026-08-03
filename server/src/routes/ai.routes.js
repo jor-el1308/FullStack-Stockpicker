@@ -13,5 +13,6 @@ const router = Router();
 router.use(requireAuth, requireActiveAccount);
 
 router.post("/analyze", aiController.analyzeStocks);
+router.get("/history", aiController.getAiHistory);
 
 export default router;

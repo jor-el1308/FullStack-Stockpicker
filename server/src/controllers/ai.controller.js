@@ -6,6 +6,7 @@
  */
 import { z } from "zod";
 import { getQualitativeAnalysis } from "../services/ai.service.js";
+import { saveAiAnalysis, listAiAnalysisHistory } from "../services/aiHistory.service.js";
 
 const stockSchema = z.object({
     exchangeCode: z.string().min(1),
@@ -29,12 +30,32 @@ export async function analyzeStocks(req, res) {
 
     try {
         const analysis = await getQualitativeAnalysis(parsed.data.stocks);
+        try {
+            await saveAiAnalysis(req.userId, parsed.data.stocks, analysis);
+        } catch (err) {
+            // Best-effort - a DB hiccup shouldn't hide the analysis the user is
+            // already looking at, it just won't show up in their history later.
+            console.error("[ai] failed to persist analysis history:", err.message);
+        }
         return res.json({ success: true, data: { analysis } });
     } catch (err) {
         console.error("[ai] analyzeStocks failed:", err.message);
         return res.status(500).json({
             success: false,
             error: { message: "AI analysis failed. Check AI_RECOMMENDATION_API_KEY is set and valid." },
+        });
+    }
+}
+
+export async function getAiHistory(req, res) {
+    try {
+        const history = await listAiAnalysisHistory(req.userId);
+        return res.json({ success: true, data: { history } });
+    } catch (err) {
+        console.error("[ai] getAiHistory failed:", err.message);
+        return res.status(500).json({
+            success: false,
+            error: { message: "Could not load AI analysis history." },
         });
     }
 }
