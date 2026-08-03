@@ -3,12 +3,29 @@
  * Advanced Filters: enable criteria per section, set min/max ranges (inputs +
  * dual slider), optional weighting, exchange filter and default exclusions.
  * "Apply Filters" runs POST /api/screener/run and returns to the Screener.
+ *
+ * The sliders move between fixed stop points (criteria.js `ticks`) instead of
+ * over a raw linear range - see RangeControl below - and each one is backed by
+ * a histogram of where the candidate stocks actually sit on that axis, fetched
+ * from /api/screener/distribution.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { BarChart2, TrendingUp, DollarSign, RotateCcw, Info, ChevronDown, ChevronUp, Play } from "lucide-react";
 import { useScreener } from "../context/ScreenerContext";
-import { CRITERIA_META, SECTIONS, EXCHANGES, DEFAULT_EXCLUDED_SECTORS } from "../screener/criteria";
+import { getDistribution } from "../api/stocks";
+import {
+  CRITERIA_META,
+  SECTIONS,
+  EXCHANGES,
+  DEFAULT_EXCLUDED_SECTORS,
+  ticksFor,
+  tickAt,
+  tickIndexOf,
+  labelledTickIndices,
+  formatTick,
+} from "../screener/criteria";
+import { buildHistograms } from "../screener/distribution";
 
 const SECTION_ICONS = {
   "Size & Valuation": <BarChart2 size={15} />,
@@ -16,56 +33,132 @@ const SECTION_ICONS = {
   "Income & Stability": <DollarSign size={15} />,
 };
 
-/** Dual-thumb slider + min/max inputs for one criterion (values in UI units). */
-function RangeControl({ meta, value, onChange }) {
-  const { min: lo, max: hi, step } = meta.slider;
+/**
+ * Distribution histogram sitting behind a slider. One bar per gap between two
+ * stop points, so bars and track segments line up exactly.
+ *
+ * Bar heights use a square-root scale: these distributions are heavily
+ * right-skewed (a handful of mega-caps, a long tail of small ones) and on a
+ * linear scale every bar but the tallest collapses to a sliver.
+ */
+function SliderHistogram({ counts, max, ticks, unit, loMin, loMax }) {
+  if (!counts?.length || !max) return null;
+  return (
+    <div className="slider-hist" aria-hidden="true">
+      {counts.map((count, i) => {
+        const inRange = ticks[i + 1] > loMin && ticks[i] < loMax;
+        const height = count ? Math.max(8, Math.round((Math.sqrt(count) / Math.sqrt(max)) * 100)) : 0;
+        const upper = i === counts.length - 1 ? `${formatTick(ticks[i + 1])}+` : formatTick(ticks[i + 1]);
+        return (
+          <div key={i} className="slider-hist-slot" title={`${formatTick(ticks[i])}–${upper}${unit}: ${count} stocks`}>
+            <div className={`slider-hist-bar${inRange ? " is-in-range" : ""}`} style={{ height: `${height}%` }} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Dual-thumb slider + min/max inputs for one criterion (values in UI units).
+ *
+ * The two native <input type="range"> elements are driven in *tick-index*
+ * space (min=0, max=ticks.length-1, step=1) rather than in value space. That
+ * gives each stop equal width on the track and makes the thumb snap onto it,
+ * so a target like "P/E 15" or "$1B market cap" can't be skipped past — which
+ * a linear 0-500 range with step=1 made almost impossible to land on. Arrow
+ * keys move one stop at a time for the same reason.
+ */
+function RangeControl({ critKey, meta, value, onChange, hist }) {
+  const ticks = ticksFor(critKey);
+  const lastIdx = ticks.length - 1;
+  const lo = ticks[0];
+  const hi = ticks[lastIdx];
+
   const minVal = value.min ?? lo;
   const maxVal = value.max ?? hi;
-  const pct = (v) => ((v - lo) / (hi - lo)) * 100;
+  const minIdx = tickIndexOf(critKey, minVal, 0);
+  const maxIdx = tickIndexOf(critKey, maxVal, lastIdx);
+  const pct = (i) => (i / lastIdx) * 100;
+
+  const labelled = labelledTickIndices(critKey);
 
   return (
     <div>
-      <div className="dual-range">
+      {/* Only reserve the space above the track when there are actually bars to
+          put there, so a failed/empty distribution collapses back to a plain
+          slider rather than leaving a gap. */}
+      <div className={`dual-range${hist?.max ? " has-hist" : ""}`}>
+        <SliderHistogram
+          counts={hist?.counts}
+          max={hist?.max}
+          ticks={ticks}
+          unit={meta.unit}
+          loMin={minVal}
+          loMax={maxVal}
+        />
         <div className="dual-range-track" />
         <div
           className="dual-range-fill"
-          style={{ left: `${pct(Math.max(minVal, lo))}%`, width: `${Math.max(0, pct(Math.min(maxVal, hi)) - pct(Math.max(minVal, lo)))}%` }}
+          style={{ left: `${pct(minIdx)}%`, width: `${Math.max(0, pct(maxIdx) - pct(minIdx))}%` }}
         />
+        <div className="dual-range-ticks">
+          {ticks.map((t, i) => (
+            <span
+              key={i}
+              className={`dual-range-tick${i >= minIdx && i <= maxIdx ? " is-active" : ""}`}
+              style={{ left: `${pct(i)}%` }}
+            />
+          ))}
+        </div>
         <input
           type="range"
-          min={lo}
-          max={hi}
-          step={step}
-          value={Math.min(Math.max(minVal, lo), hi)}
-          onChange={(e) => onChange({ ...value, min: Math.min(Number(e.target.value), maxVal) })}
+          min={0}
+          max={lastIdx}
+          step={1}
+          value={minIdx}
+          onChange={(e) => onChange({ ...value, min: tickAt(critKey, Math.min(Number(e.target.value), maxIdx)) })}
           aria-label={`${meta.label} minimum`}
+          aria-valuetext={`${formatTick(ticks[minIdx])}${meta.unit}`}
         />
         <input
           type="range"
-          min={lo}
-          max={hi}
-          step={step}
-          value={Math.min(Math.max(maxVal, lo), hi)}
-          onChange={(e) => onChange({ ...value, max: Math.max(Number(e.target.value), minVal) })}
+          min={0}
+          max={lastIdx}
+          step={1}
+          value={maxIdx}
+          onChange={(e) => onChange({ ...value, max: tickAt(critKey, Math.max(Number(e.target.value), minIdx)) })}
           aria-label={`${meta.label} maximum`}
+          aria-valuetext={`${formatTick(ticks[maxIdx])}${meta.unit}`}
         />
+      </div>
+      <div className="dual-range-scale">
+        {labelled.map((i) => (
+          <span key={i} className="dual-range-scale-label" style={{ left: `${pct(i)}%` }}>
+            {formatTick(ticks[i])}
+            {i === lastIdx ? "+" : ""}
+          </span>
+        ))}
       </div>
       <div className="range-bounds">
         <span>
-          {lo}
+          {formatTick(lo)}
           {meta.unit}
-          {minVal <= lo ? " (no min)" : ""}
+          {minIdx <= 0 ? " (no min)" : ""}
+        </span>
+        <span className="range-bounds-mid">
+          {hist?.shown != null ? `${hist.shown} stocks in this view` : ""}
         </span>
         <span>
-          {hi}
-          {meta.unit}+{maxVal >= hi ? " (no max)" : ""}
+          {formatTick(hi)}
+          {meta.unit}+{maxIdx >= lastIdx ? " (no max)" : ""}
         </span>
       </div>
     </div>
   );
 }
 
-function FilterRow({ critKey, state, onChange }) {
+function FilterRow({ critKey, state, onChange, hist }) {
   const meta = CRITERIA_META[critKey];
   const enabled = state.enabled;
 
@@ -132,16 +225,18 @@ function FilterRow({ critKey, state, onChange }) {
       </div>
       {enabled && (
         <RangeControl
+          critKey={critKey}
           meta={meta}
           value={{ min: state.min, max: state.max }}
           onChange={(v) => set({ min: v.min, max: v.max })}
+          hist={hist}
         />
       )}
     </div>
   );
 }
 
-function FilterSection({ title, keys, values, onChange }) {
+function FilterSection({ title, keys, values, onChange, histograms }) {
   const [open, setOpen] = useState(true);
   const activeCount = keys.filter((k) => values[k].enabled).length;
 
@@ -157,7 +252,10 @@ function FilterSection({ title, keys, values, onChange }) {
         </span>
         {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
       </button>
-      {open && keys.map((k) => <FilterRow key={k} critKey={k} state={values[k]} onChange={(s) => onChange(k, s)} />)}
+      {open &&
+        keys.map((k) => (
+          <FilterRow key={k} critKey={k} state={values[k]} onChange={(s) => onChange(k, s)} hist={histograms?.[k]} />
+        ))}
     </div>
   );
 }
@@ -197,6 +295,44 @@ export default function AdvancedFilters() {
   const [localExchanges, setLocalExchanges] = useState(exchanges);
   const [localSectors, setLocalSectors] = useState(excludeSectors);
   const [localMinAge, setLocalMinAge] = useState(minCompanyAgeYears);
+
+  // Universe sample backing the slider histograms. Refetched only when the
+  // universe itself changes (exchanges / excluded sectors / min age) — the
+  // per-criterion ranges are cross-filtered locally, which is what keeps the
+  // bars responsive while dragging. Server-side cached, so this is cheap.
+  const [distribution, setDistribution] = useState(null);
+  const [distError, setDistError] = useState(false);
+  const sectorsKey = localSectors.join(",");
+  const exchangesKey = localExchanges.join(",");
+
+  useEffect(() => {
+    let cancelled = false;
+    setDistError(false);
+    getDistribution({
+      exchanges: localExchanges,
+      excludeSectors: localSectors,
+      minCompanyAgeYears: Number(localMinAge) || 0,
+    })
+      .then((data) => {
+        if (!cancelled) setDistribution(data);
+      })
+      .catch(() => {
+        // Histograms are decoration — a failure (offline, not logged in, empty
+        // DB) should leave the sliders fully usable, just without bars.
+        if (!cancelled) {
+          setDistribution(null);
+          setDistError(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [exchangesKey, sectorsKey, localMinAge]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const { byKey: histograms, matching, total } = useMemo(
+    () => buildHistograms(distribution, values),
+    [distribution, values]
+  );
 
   const sectionKeys = useMemo(() => {
     const map = Object.fromEntries(SECTIONS.map((s) => [s, []]));
@@ -260,6 +396,11 @@ export default function AdvancedFilters() {
           <p className="page-subtitle">Refine your screen with granular criteria, then apply to run it on the database.</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {total > 0 && (
+            <span className="chip" title="Live estimate from the sampled universe — press Apply to run the real screen.">
+              ~{matching} of {total} match
+            </span>
+          )}
           <span className="chip chip-good">Filters active: {activeCount}</span>
           <button className="btn btn-ghost" onClick={handleReset}>
             <RotateCcw size={13} />
@@ -268,6 +409,13 @@ export default function AdvancedFilters() {
         </div>
       </div>
 
+      {distError && (
+        <div className="notice notice-muted" style={{ marginBottom: 14 }}>
+          Couldn't load the criteria distribution, so the sliders are showing without their histograms. The filters
+          themselves still work.
+        </div>
+      )}
+
       {SECTIONS.map((s) => (
         <FilterSection
           key={s}
@@ -275,6 +423,7 @@ export default function AdvancedFilters() {
           keys={sectionKeys[s]}
           values={values}
           onChange={(k, st) => setValues((prev) => ({ ...prev, [k]: st }))}
+          histograms={histograms}
         />
       ))}
 

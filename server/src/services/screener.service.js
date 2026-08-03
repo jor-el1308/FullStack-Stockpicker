@@ -12,6 +12,7 @@
  * Depends on the schema owned by Person 2 (server/src/db/schema.sql).
  */
 import { pool } from "../config/db.js";
+import { cached } from "../utils/cache.js";
 
 /** All criteria the engine understands, with UI-friendly defaults. */
 export const CRITERIA_DEFS = [
@@ -54,9 +55,13 @@ const DEFAULT_EXCLUDED_SECTORS = ["Gambling", "Tobacco"];
 /**
  * Build the parameterized SELECT and its bound params from a ScreenerRequest.
  * @param {import("../../../shared/types/index.js").ScreenerRequest & { criteria?: any[] }} request
+ * @param {{ limit?: number }} [options] `limit` overrides the default 500-row cap
+ *   (the distribution endpoint needs a wider slice of the universe so its
+ *   histograms aren't biased towards the largest companies).
  */
-export function buildScreenerQuery(request = {}) {
+export function buildScreenerQuery(request = {}, options = {}) {
   const criteria = Array.isArray(request.criteria) ? request.criteria : [];
+  const limit = Number.isFinite(Number(options.limit)) ? Math.max(1, Math.floor(Number(options.limit))) : 500;
   const params = [];
 
   // Latest-value subqueries so "current" == max(date/year).
@@ -132,7 +137,7 @@ export function buildScreenerQuery(request = {}) {
     params.push(...request.exchanges);
   }
 
-  const sql = `${base}\n    WHERE ${where.join("\n      AND ")}\n    ORDER BY mc.market_cap DESC\n    LIMIT 500`;
+  const sql = `${base}\n    WHERE ${where.join("\n      AND ")}\n    ORDER BY mc.market_cap DESC\n    LIMIT ${limit}`;
   return { sql, params };
 }
 
@@ -202,6 +207,66 @@ export async function runScreen(request = {}) {
     criteriaUsed: criteria.length ? criteria : getDefaultCriteria(),
     results,
   };
+}
+
+/**
+ * How many stocks the distribution endpoint samples. Big enough that the
+ * histograms behind the Advanced Filters sliders describe the real universe,
+ * small enough that the payload stays a few hundred KB at most.
+ */
+const DISTRIBUTION_LIMIT = 3000;
+
+/** Distribution responses only change when ingestion runs, so cache generously. */
+const DISTRIBUTION_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * Per-stock values for every criterion across the (unfiltered) universe, so the
+ * filter UI can draw a distribution histogram behind each slider.
+ *
+ * Only the universe-level exclusions are applied - exchanges, excluded sectors
+ * and the minimum company age. The per-criterion min/max ranges are deliberately
+ * NOT applied here: the client cross-filters client-side so that each slider's
+ * histogram shows the stocks passing all the *other* active criteria, which is
+ * what makes the bars useful while you drag.
+ *
+ * Rows are returned as plain number arrays in `keys` order (nulls preserved)
+ * rather than objects - roughly a third of the JSON of the object form.
+ *
+ * @param {{ exchanges?: string[], excludeSectors?: string[], minCompanyAgeYears?: number }} request
+ * @returns {Promise<{ keys: string[], rows: (number|null)[][], total: number, sampled: boolean }>}
+ */
+export async function getDistribution(request = {}) {
+  const keys = CRITERIA_DEFS.map((d) => d.key);
+  const cacheKey = `screener:distribution:${JSON.stringify({
+    exchanges: [...(request.exchanges ?? [])].sort(),
+    excludeSectors: [...(request.excludeSectors ?? [])].sort(),
+    minCompanyAgeYears: request.minCompanyAgeYears ?? 5,
+  })}`;
+
+  return cached(cacheKey, DISTRIBUTION_TTL_MS, async () => {
+    // criteria: [] => universe-level exclusions only.
+    const { sql, params } = buildScreenerQuery({ ...request, criteria: [] }, { limit: DISTRIBUTION_LIMIT });
+    const [rows] = await pool.query(sql, params);
+
+    const compact = rows.map((r) =>
+      keys.map((k) => {
+        // Guard the null/"" cases explicitly: Number(null) and Number("") are
+        // both 0, which would silently pile every stock with a missing value
+        // into the histogram's zero bucket instead of omitting it.
+        const v = r[k];
+        if (v == null || v === "") return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      })
+    );
+
+    return {
+      keys,
+      rows: compact,
+      total: compact.length,
+      sampled: compact.length >= DISTRIBUTION_LIMIT,
+    };
+  });
 }
 
 /** Sensible starting criteria for the UI (GET /api/screener/default-criteria). */

@@ -695,18 +695,27 @@ a, button {
   color: var(--color-muted-text);
 }
 
-/* Dual-thumb range slider built from two native inputs */
+/* Dual-thumb range slider built from two native inputs.
+   --track-top is where the 3px track line sits inside .dual-range; everything
+   else (thumbs, fill, tick marks) is positioned relative to it. It grows when
+   .has-hist reserves room above the track for the distribution histogram. */
 .dual-range {
+  --track-top: 10px;
   position: relative;
-  height: 24px;
+  height: 30px;
   margin-top: 12px;
+}
+
+.dual-range.has-hist {
+  --track-top: 46px;
+  height: 66px;
 }
 
 .dual-range input[type="range"] {
   position: absolute;
   left: 0;
   right: 0;
-  top: 0;
+  top: calc(var(--track-top) - 10px);
   width: 100%;
   height: 24px;
   margin: 0;
@@ -714,6 +723,14 @@ a, button {
   pointer-events: none;
   -webkit-appearance: none;
   appearance: none;
+}
+
+.dual-range input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px rgba(26, 92, 158, 0.3);
+}
+
+.dual-range input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px rgba(26, 92, 158, 0.3);
 }
 
 .dual-range input[type="range"]::-webkit-slider-thumb {
@@ -752,29 +769,130 @@ a, button {
 
 .dual-range-track {
   position: absolute;
-  top: 10px;
+  top: var(--track-top);
   left: 0;
   right: 0;
   height: 3px;
   border-radius: 999px;
-  background: rgba(10, 22, 40, 0.12);
+  background: color-mix(in srgb, var(--color-text) 14%, transparent);
 }
 
 .dual-range-fill {
   position: absolute;
-  top: 10px;
+  top: var(--track-top);
   height: 3px;
   border-radius: 999px;
   background: var(--color-clickable);
 }
 
+/* Stop points. Every notch the thumbs can land on gets a mark, so it's obvious
+   where the slider will snap to before you start dragging. */
+.dual-range-ticks {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.dual-range-tick {
+  position: absolute;
+  top: calc(var(--track-top) + 6px);
+  width: 1px;
+  height: 5px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--color-text) 28%, transparent);
+}
+
+.dual-range-tick.is-active {
+  height: 7px;
+  background: var(--color-clickable);
+}
+
+/* Value labels for a subset of the stops (see labelledTickIndices). */
+.dual-range-scale {
+  position: relative;
+  height: 13px;
+  margin-top: 1px;
+}
+
+.dual-range-scale-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: var(--font-numeric);
+  font-size: 9.5px;
+  color: var(--color-muted-text);
+}
+
+.dual-range-scale-label:first-child {
+  transform: none;
+}
+
+.dual-range-scale-label:last-child {
+  transform: translateX(-100%);
+}
+
+/* Distribution histogram behind the slider: one bar per gap between two stop
+   points, so a bar always lines up with the track segment above it. */
+.slider-hist {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* Stops short of the track so the bars' tooltip hit areas never sit on top
+     of the slider thumbs, which start 10px above the track line. */
+  height: calc(var(--track-top) - 12px);
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  pointer-events: none;
+}
+
+.slider-hist-slot {
+  flex: 1 1 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  pointer-events: auto;
+}
+
+.slider-hist-bar {
+  width: 100%;
+  min-height: 0;
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, var(--color-text) 13%, transparent);
+  transition: height 0.12s ease, background 0.12s ease;
+}
+
+/* Bars inside the selected range pick up the accent so the current selection
+   reads as "this slice of the distribution". */
+.slider-hist-bar.is-in-range {
+  background: color-mix(in srgb, var(--color-clickable) 55%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slider-hist-bar {
+    transition: none;
+  }
+}
+
 .range-bounds {
   display: flex;
   justify-content: space-between;
+  gap: 8px;
   margin-top: 2px;
   font-family: var(--font-numeric);
   font-size: 10px;
   color: var(--color-muted-text);
+}
+
+.range-bounds-mid {
+  flex: 1 1 auto;
+  text-align: center;
+  opacity: 0.8;
 }
 
 /* Toggle switch used to enable/disable a criterion */

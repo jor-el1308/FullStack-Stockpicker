@@ -27,4 +27,10 @@ router.get("/", screenerController.runScreener);
 router.post("/run", screenerController.runScreener);
 router.get("/default-criteria", screenerController.getDefaultCriteria);
 
+// Per-criterion value distribution for the universe, used to draw the
+// histograms behind the Advanced Filters sliders. GET for the simple case,
+// POST for when the exchange/sector exclusion lists are long.
+router.get("/distribution", screenerController.getDistribution);
+router.post("/distribution", screenerController.getDistribution);
+
 export default router;

@@ -24,6 +24,20 @@ export async function getDefaultCriteria() {
   return data.criteria;
 }
 
+// POST /api/screener/distribution — per-stock values for every criterion across
+// the universe, used to draw the histogram behind each Advanced Filters slider.
+// Only universe-level options matter here (exchanges / excluded sectors / min
+// age); the criteria ranges are cross-filtered client-side.
+// Returns { keys: CriteriaKey[], rows: (number|null)[][], total, sampled } —
+// each row is one stock, values in `keys` order and in raw API units.
+export function getDistribution({ exchanges, excludeSectors, minCompanyAgeYears } = {}) {
+  return api.post("/screener/distribution", {
+    ...(exchanges?.length ? { exchanges } : {}),
+    ...(excludeSectors ? { excludeSectors } : {}),
+    ...(minCompanyAgeYears != null ? { minCompanyAgeYears: Number(minCompanyAgeYears) || 0 } : {}),
+  });
+}
+
 // Convenience for the Dashboard: default screen, unwrapped to just the rows,
 // since ResultsTable only needs ScreenerResultRow[].
 export async function getStocks() {
