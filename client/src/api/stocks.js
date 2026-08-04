@@ -79,3 +79,26 @@ export function saveScreen(name, criteria) {
 export function deleteScreen(id) {
   return api.delete(`/auth/me/criteria-sets/${id}`);
 }
+
+// ---------- Watchlist / alert preferences ----------
+
+// GET /api/notifications/watchlist
+export function listWatchlist() {
+  return api.get("/notifications/watchlist");
+}
+
+// POST /api/notifications/watchlist
+export function addToWatchlist({ exchangeCode, stockCode, savedCriteriaSetId, channel, recipientNumber }) {
+  return api.post("/notifications/watchlist", {
+    exchangeCode,
+    stockCode,
+    savedCriteriaSetId,
+    channel,
+    recipientNumber,
+  });
+}
+
+// DELETE /api/notifications/watchlist/:id
+export function removeFromWatchlist(id) {
+  return api.delete(`/notifications/watchlist/${id}`);
+}

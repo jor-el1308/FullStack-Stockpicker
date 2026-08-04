@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, useLocation, useNavigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Activate from "./pages/Activate";
 import Screener from "./pages/Screener";
@@ -103,7 +103,7 @@ function TopBar() {
 
   function handleLogout() {
     logout();
-    navigate("/login");
+    navigate("/");
   }
 
   const initials = user?.name
@@ -175,37 +175,6 @@ function TopBar() {
   );
 }
 
-/**
- * Paywall route guard (Person 2 - Subscription/Paywall).
- * If a user is logged in but hasn't paid the activation fee yet
- * (user.isActive === false), every route except /activate and /login
- * redirects to /activate. Mirrors the server-side gate in
- * server/src/middleware/subscription.middleware.js - this is purely a UX
- * nicety (avoid flashing paywalled content); the API still enforces the
- * real gate independently.
- */
-function RequireActive({ children }) {
-  const { user } = useAuth();
-  if (user && !user.isActive) {
-    return <Navigate to="/activate" replace />;
-  }
-  return children;
-}
-
-/**
- * Admin route guard (Person 2 - Admin Dashboard).
- * Non-admins (or logged-out users) get bounced to the screener instead of
- * seeing the admin page. Mirrors the server-side requireAdmin middleware -
- * a UX nicety, not the real security boundary (the API enforces that).
- */
-function RequireAdmin({ children }) {
-  const { user } = useAuth();
-  if (!user || !user.isAdmin) {
-    return <Navigate to="/" replace />;
-  }
-  return children;
-}
-
 function AppLayout() {
   const { user } = useAuth();
   const { pathname } = useLocation();
@@ -217,70 +186,14 @@ function AppLayout() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/activate" element={<Activate />} />
-      <Route
-        path="/"
-        element={
-          <RequireActive>
-            <Screener />
-          </RequireActive>
-        }
-      />
-      <Route
-        path="/filters"
-        element={
-          <RequireActive>
-            <AdvancedFilters />
-          </RequireActive>
-        }
-      />
-      <Route
-        path="/saved"
-        element={
-          <RequireActive>
-            <SavedScreens />
-          </RequireActive>
-        }
-      />
-      <Route
-        path="/dashboard"
-        element={
-          <RequireActive>
-            <Dashboard />
-          </RequireActive>
-        }
-      />
-      <Route
-        path="/stock/:exchangeCode/:stockCode"
-        element={
-          <RequireActive>
-            <StockDetail />
-          </RequireActive>
-        }
-      />
-      <Route
-        path="/watchlist"
-        element={
-          <RequireActive>
-            <Watchlist />
-          </RequireActive>
-        }
-      />
-      <Route
-        path="/admin"
-        element={
-          <RequireAdmin>
-            <Admin />
-          </RequireAdmin>
-        }
-      />
-      <Route
-        path="/settings"
-        element={
-          <RequireActive>
-            <Settings />
-          </RequireActive>
-        }
-      />
+      <Route path="/" element={<Screener />} />
+      <Route path="/filters" element={<AdvancedFilters />} />
+      <Route path="/saved" element={<SavedScreens />} />
+      <Route path="/dashboard" element={<Dashboard />} />
+      <Route path="/stock/:exchangeCode/:stockCode" element={<StockDetail />} />
+      <Route path="/watchlist" element={<Watchlist />} />
+      <Route path="/admin" element={<Admin />} />
+      <Route path="/settings" element={<Settings />} />
     </Routes>
   );
 
