@@ -5,27 +5,34 @@
  * LLM for qualitative analysis (recent context, growth outlook, reasoning)
  * - requirement doc section 6.
  *
- * Routes every model tier through OpenRouter (https://openrouter.ai), which
- * exposes an OpenAI-compatible /chat/completions endpoint in front of
- * Google, OpenAI, Anthropic, and DeepSeek models behind a single API key
- * (see server/.env.example - OPENROUTER_API_KEY). Kept in its own service
- * file, same pattern as subscription.service.js's Stripe wrapper: lazy
- * client init, a clear error if the key is missing, and all "how do we talk
- * to this external API" logic contained here so the controller stays thin.
+ * The default tier (Gemini Flash) calls Google's Generative Language API
+ * directly with AI_RECOMMENDATION_API_KEY - this is the one kept "live"
+ * during development since it has a real free tier with no credit card.
+ * The other three tiers (GPT-4o mini, Claude Haiku, DeepSeek) route through
+ * OpenRouter (https://openrouter.ai) under one OPENROUTER_API_KEY, ready to
+ * go once that account has credits. See server/.env.example for both keys.
+ * Kept in its own service file, same pattern as subscription.service.js's
+ * Stripe wrapper: lazy key lookup, a clear error if a key is missing, and
+ * all "how do we talk to this external API" logic contained here so the
+ * controller stays thin.
  */
+const GEMINI_MODEL = "gemini-flash-latest";
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 // Model tiers selectable from Settings -> AI preferences (ai_preferences.ai_model_tier).
-// All tiers route through OpenRouter, so any model OpenRouter carries can be
-// added here without touching the client/DB layer. Keys stay as they were
-// before the OpenRouter migration ("flash" etc.) so existing saved
-// preferences and the ai_preferences.ai_model_tier DB default keep working.
-// See https://openrouter.ai/models for the full catalogue/slug format.
+// "flash" is called directly against Google's API (provider: "gemini");
+// everything else routes through OpenRouter (provider: "openrouter"), so any
+// model OpenRouter carries can be added here without touching the client/DB
+// layer. Keys stay as they were before the OpenRouter migration ("flash"
+// etc.) so existing saved preferences and the ai_preferences.ai_model_tier
+// DB default keep working. See https://openrouter.ai/models for the full
+// OpenRouter catalogue/slug format.
 const MODEL_TIERS = {
-    flash: { label: "Gemini 2.5 Flash", model: "google/gemini-2.5-flash" },
-    "gpt-4o-mini": { label: "GPT-4o mini", model: "openai/gpt-4o-mini" },
-    "claude-haiku": { label: "Claude Haiku 4.5", model: "anthropic/claude-haiku-4.5" },
-    "deepseek-chat": { label: "DeepSeek Chat", model: "deepseek/deepseek-chat" },
+    flash: { label: "Gemini 2.5 Flash", provider: "gemini", model: GEMINI_MODEL },
+    "gpt-4o-mini": { label: "GPT-4o mini", provider: "openrouter", model: "openai/gpt-4o-mini" },
+    "claude-haiku": { label: "Claude Haiku 4.5", provider: "openrouter", model: "anthropic/claude-haiku-4.5" },
+    "deepseek-chat": { label: "DeepSeek Chat", provider: "openrouter", model: "deepseek/deepseek-chat" },
 };
 
 const PERSONAS = {
@@ -38,7 +45,18 @@ const PERSONAS = {
         "an income-focused financial analyst who prioritizes dividend yield and payout stability over capital growth",
 };
 
-function getApiKey() {
+function getGeminiApiKey() {
+    const key = process.env.AI_RECOMMENDATION_API_KEY;
+    if (!key) {
+        throw new Error(
+            "AI_RECOMMENDATION_API_KEY is not set - get a free key at https://aistudio.google.com/app/apikey " +
+            "and add it to server/.env"
+        );
+    }
+    return key;
+}
+
+function getOpenRouterApiKey() {
     const key = process.env.OPENROUTER_API_KEY;
     if (!key) {
         throw new Error(
@@ -130,12 +148,37 @@ function stripMarkdown(text) {
  *   The caller's saved ai_preferences row (see aiPreferences.service.js).
  * @returns {Promise<string>} plain-text analysis
  */
-export async function getQualitativeAnalysis(stocks, preferences = {}) {
-    const { aiModelTier = "flash" } = preferences;
-    const tier = MODEL_TIERS[aiModelTier] ?? MODEL_TIERS.flash;
+/**
+ * Direct call to Google's Generative Language API (no OpenRouter, no
+ * credits needed - the free tier is enough for dev/demo use).
+ * @returns {Promise<string>}
+ */
+async function callGemini(prompt) {
+    const apiKey = getGeminiApiKey();
 
-    const apiKey = getApiKey();
-    const prompt = buildPrompt(stocks, preferences);
+    const response = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(apiKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    });
+
+    if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new Error(`Gemini request failed (${response.status}): ${detail}`);
+    }
+
+    const data = await response.json();
+    return (data?.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("");
+}
+
+/**
+ * Call one of the non-Gemini tiers via OpenRouter's OpenAI-compatible
+ * /chat/completions endpoint.
+ * @param {{label: string, model: string}} tier
+ * @returns {Promise<string>}
+ */
+async function callOpenRouter(tier, prompt) {
+    const apiKey = getOpenRouterApiKey();
 
     const response = await fetch(OPENROUTER_URL, {
         method: "POST",
@@ -159,7 +202,16 @@ export async function getQualitativeAnalysis(stocks, preferences = {}) {
     }
 
     const data = await response.json();
-    const text = data?.choices?.[0]?.message?.content;
+    return data?.choices?.[0]?.message?.content ?? "";
+}
+
+export async function getQualitativeAnalysis(stocks, preferences = {}) {
+    const { aiModelTier = "flash" } = preferences;
+    const tier = MODEL_TIERS[aiModelTier] ?? MODEL_TIERS.flash;
+    const prompt = buildPrompt(stocks, preferences);
+
+    const text = tier.provider === "gemini" ? await callGemini(prompt) : await callOpenRouter(tier, prompt);
+
     if (!text) {
         throw new Error("AI provider returned an empty response");
     }

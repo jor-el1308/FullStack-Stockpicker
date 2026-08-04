@@ -62,7 +62,11 @@ export async function analyzeStocks(req, res) {
         console.error("[ai] analyzeStocks failed:", err.message);
         return res.status(500).json({
             success: false,
-            error: { message: "AI analysis failed. Check OPENROUTER_API_KEY is set and valid." },
+            error: {
+                message:
+                    "AI analysis failed. Check AI_RECOMMENDATION_API_KEY (Gemini) or OPENROUTER_API_KEY " +
+                    "(other models) is set and valid.",
+            },
         });
     }
 }
