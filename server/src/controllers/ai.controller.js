@@ -5,7 +5,7 @@
  * cost bounded) before calling out to the AI provider.
  */
 import { z } from "zod";
-import { getQualitativeAnalysis, ModelTierUnavailableError } from "../services/ai.service.js";
+import { getQualitativeAnalysis } from "../services/ai.service.js";
 import {
     saveAiAnalysis,
     listAiAnalysisHistory,
@@ -59,13 +59,10 @@ export async function analyzeStocks(req, res) {
         }
         return res.json({ success: true, data: { analysis } });
     } catch (err) {
-        if (err instanceof ModelTierUnavailableError) {
-            return res.status(400).json({ success: false, error: { message: err.message } });
-        }
         console.error("[ai] analyzeStocks failed:", err.message);
         return res.status(500).json({
             success: false,
-            error: { message: "AI analysis failed. Check AI_RECOMMENDATION_API_KEY is set and valid." },
+            error: { message: "AI analysis failed. Check OPENROUTER_API_KEY is set and valid." },
         });
     }
 }

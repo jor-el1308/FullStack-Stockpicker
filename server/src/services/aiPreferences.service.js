@@ -10,8 +10,9 @@
 import { pool } from "../config/db.js";
 
 // Kept here (not just in the controller) so ai.service.js can import the
-// same list of valid personas/detail levels without duplicating them.
-export const AI_MODEL_TIERS = ["flash", "gpt-4o-mini", "claude-haiku"];
+// same list of valid personas/detail levels without duplicating them. Must
+// stay in sync with MODEL_TIERS in ai.service.js.
+export const AI_MODEL_TIERS = ["flash", "gpt-4o-mini", "claude-haiku", "deepseek-chat"];
 export const AI_PERSONAS = ["balanced", "conservative", "growth", "income"];
 export const AI_DETAIL_LEVELS = ["concise", "detailed"];
 

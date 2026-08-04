@@ -1,29 +1,31 @@
 /**
  * Owner: Person 1 (Yong Wee) - Auth + AI Recommendation.
  *
- * After a user shortlists stocks from the screener, this sends them to a
- * Gemini model for qualitative analysis (recent context, growth outlook,
- * reasoning) - requirement doc section 6.
+ * After a user shortlists stocks from the screener, this sends them to an
+ * LLM for qualitative analysis (recent context, growth outlook, reasoning)
+ * - requirement doc section 6.
  *
- * Uses Google's free-tier Gemini API (see server/.env.example -
- * AI_RECOMMENDATION_API_KEY). Kept in its own service file, same pattern as
- * subscription.service.js's Stripe wrapper: lazy client init, a clear error
- * if the key is missing, and all "how do we talk to this external API"
- * logic contained here so the controller stays thin.
+ * Routes every model tier through OpenRouter (https://openrouter.ai), which
+ * exposes an OpenAI-compatible /chat/completions endpoint in front of
+ * Google, OpenAI, Anthropic, and DeepSeek models behind a single API key
+ * (see server/.env.example - OPENROUTER_API_KEY). Kept in its own service
+ * file, same pattern as subscription.service.js's Stripe wrapper: lazy
+ * client init, a clear error if the key is missing, and all "how do we talk
+ * to this external API" logic contained here so the controller stays thin.
  */
-import { GoogleGenAI } from "@google/genai";
-
-const MODEL = "gemini-flash-latest";
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 // Model tiers selectable from Settings -> AI preferences (ai_preferences.ai_model_tier).
-// Only "flash" is actually wired up to a live provider right now - the other
-// two are placeholders (real model names, no API integration written yet) so
-// the preference UI/DB/env plumbing exists ahead of those providers being
-// implemented. See server/.env.example for the placeholder key names.
+// All tiers route through OpenRouter, so any model OpenRouter carries can be
+// added here without touching the client/DB layer. Keys stay as they were
+// before the OpenRouter migration ("flash" etc.) so existing saved
+// preferences and the ai_preferences.ai_model_tier DB default keep working.
+// See https://openrouter.ai/models for the full catalogue/slug format.
 const MODEL_TIERS = {
-    flash: { label: "Gemini Flash" },
-    "gpt-4o-mini": { label: "GPT-4o mini", envKey: "OPENAI_API_KEY" },
-    "claude-haiku": { label: "Claude Haiku", envKey: "ANTHROPIC_API_KEY" },
+    flash: { label: "Gemini 2.5 Flash", model: "google/gemini-2.5-flash" },
+    "gpt-4o-mini": { label: "GPT-4o mini", model: "openai/gpt-4o-mini" },
+    "claude-haiku": { label: "Claude Haiku 4.5", model: "anthropic/claude-haiku-4.5" },
+    "deepseek-chat": { label: "DeepSeek Chat", model: "deepseek/deepseek-chat" },
 };
 
 const PERSONAS = {
@@ -36,23 +38,15 @@ const PERSONAS = {
         "an income-focused financial analyst who prioritizes dividend yield and payout stability over capital growth",
 };
 
-/**
- * Thrown by getQualitativeAnalysis() when the caller's preferred model tier
- * isn't backed by a real provider integration yet (see MODEL_TIERS above) -
- * the controller maps this to a 400 (user-fixable: pick a different tier)
- * rather than a generic 500.
- */
-export class ModelTierUnavailableError extends Error {}
-
-function getClient() {
-    const key = process.env.AI_RECOMMENDATION_API_KEY;
+function getApiKey() {
+    const key = process.env.OPENROUTER_API_KEY;
     if (!key) {
         throw new Error(
-            "AI_RECOMMENDATION_API_KEY is not set - get a free key at https://aistudio.google.com/app/apikey " +
+            "OPENROUTER_API_KEY is not set - get a free key at https://openrouter.ai/keys " +
             "and add it to server/.env"
         );
     }
-    return new GoogleGenAI({ apiKey: key });
+    return key;
 }
 
 /**
@@ -139,22 +133,33 @@ function stripMarkdown(text) {
 export async function getQualitativeAnalysis(stocks, preferences = {}) {
     const { aiModelTier = "flash" } = preferences;
     const tier = MODEL_TIERS[aiModelTier] ?? MODEL_TIERS.flash;
-    if (aiModelTier !== "flash") {
-        throw new ModelTierUnavailableError(
-            `${tier.label} isn't wired up yet - only Gemini Flash is implemented right now. ` +
-            `Switch back to Gemini Flash in Settings -> AI preferences to run an analysis.`
-        );
-    }
 
-    const client = getClient();
+    const apiKey = getApiKey();
     const prompt = buildPrompt(stocks, preferences);
 
-    const response = await client.models.generateContent({
-        model: MODEL,
-        contents: prompt,
+    const response = await fetch(OPENROUTER_URL, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            // OpenRouter uses these to attribute/rank apps on their leaderboard -
+            // optional, but recommended by their docs. Not sensitive.
+            "HTTP-Referer": process.env.CLIENT_ORIGIN || "http://localhost:5173",
+            "X-Title": "Stockpicker AI Analysis",
+        },
+        body: JSON.stringify({
+            model: tier.model,
+            messages: [{ role: "user", content: prompt }],
+        }),
     });
 
-    const text = response.text;
+    if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new Error(`OpenRouter request failed (${response.status}) for ${tier.label}: ${detail}`);
+    }
+
+    const data = await response.json();
+    const text = data?.choices?.[0]?.message?.content;
     if (!text) {
         throw new Error("AI provider returned an empty response");
     }

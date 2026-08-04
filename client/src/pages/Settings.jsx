@@ -826,14 +826,16 @@ function ChangePasswordControl() {
   );
 }
 
-// Model tiers selectable in the AI preferences panel. Only "flash" is wired
-// up to a real provider today (server/src/services/ai.service.js) - the
-// other two are placeholder model names reserved for when that integration
-// is built (see server/.env.example's OPENAI_API_KEY/ANTHROPIC_API_KEY).
+// Model tiers selectable in the AI preferences panel. All four route through
+// OpenRouter under one API key (server/src/services/ai.service.js -
+// OPENROUTER_API_KEY), so every option here is fully wired up. Keep in sync
+// with MODEL_TIERS in ai.service.js and AI_MODEL_TIERS in
+// aiPreferences.service.js.
 const AI_MODEL_OPTIONS = [
-  { id: "flash", label: "Gemini Flash", description: "Google's Gemini model - fast, and the only model actually wired up to run analysis right now." },
-  { id: "gpt-4o-mini", label: "GPT-4o mini", description: "Placeholder - not yet connected. Selecting this saves your preference, but analysis still needs Gemini Flash for now." },
-  { id: "claude-haiku", label: "Claude Haiku", description: "Placeholder - not yet connected. Selecting this saves your preference, but analysis still needs Gemini Flash for now." },
+  { id: "flash", label: "Gemini 2.5 Flash", description: "Google's Gemini model - fast and well-rounded. The default." },
+  { id: "gpt-4o-mini", label: "GPT-4o mini", description: "OpenAI's lightweight GPT-4o model - quick, cost-efficient responses." },
+  { id: "claude-haiku", label: "Claude Haiku 4.5", description: "Anthropic's fast Claude model - crisp, concise write-ups." },
+  { id: "deepseek-chat", label: "DeepSeek Chat", description: "DeepSeek's general-purpose chat model - strong reasoning at low cost." },
 ];
 
 const AI_PERSONA_OPTIONS = [
