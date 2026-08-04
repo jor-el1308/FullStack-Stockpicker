@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation, useNavigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Activate from "./pages/Activate";
 import Screener from "./pages/Screener";
@@ -178,6 +178,37 @@ function TopBar() {
       )}
     </header>
   );
+}
+
+/**
+ * Paywall route guard (Person 2 - Subscription/Paywall).
+ * If a user is logged in but hasn't paid the activation fee yet
+ * (user.isActive === false), every route except /activate and /login
+ * redirects to /activate. Mirrors the server-side gate in
+ * server/src/middleware/subscription.middleware.js - this is purely a UX
+ * nicety (avoid flashing paywalled content); the API still enforces the
+ * real gate independently.
+ */
+function RequireActive({ children }) {
+  const { user } = useAuth();
+  if (user && !user.isActive) {
+    return <Navigate to="/activate" replace />;
+  }
+  return children;
+}
+
+/**
+ * Admin route guard (Person 2 - Admin Dashboard).
+ * Non-admins (or logged-out users) get bounced to the screener instead of
+ * seeing the admin page. Mirrors the server-side requireAdmin middleware -
+ * a UX nicety, not the real security boundary (the API enforces that).
+ */
+function RequireAdmin({ children }) {
+  const { user } = useAuth();
+  if (!user || !user.isAdmin) {
+    return <Navigate to="/" replace />;
+  }
+  return children;
 }
 
 function AppLayout() {
