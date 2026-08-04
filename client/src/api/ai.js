@@ -4,8 +4,12 @@
 import { api } from "./client";
 
 // POST /api/ai/analyze — send up to 10 shortlisted ScreenerResultRow-shaped
-// stocks, get back { analysis: string } of AI-generated qualitative
-// analysis (recent context, growth outlook, reasoning per stock).
+// stocks, get back { analysis, mode }. A single stock gets mode: "single"
+// and `analysis` is a plain-text write-up; two or more stocks get mode:
+// "comparison" and `analysis` is a structured
+// { stocks, criteria: [{ name, notes, winner }], summary, disclaimer }
+// object for rendering a head-to-head comparison table (see
+// AiComparisonTable).
 export function analyzeStocks(stocks) {
     return api.post("/ai/analyze", { stocks });
 }

@@ -49,15 +49,21 @@ export async function analyzeStocks(req, res) {
 
     try {
         const preferences = await getAiPreferences(req.userId);
-        const analysis = await getQualitativeAnalysis(parsed.data.stocks, preferences);
+        const result = await getQualitativeAnalysis(parsed.data.stocks, preferences);
+        // Comparisons are structured objects (see ai.service.js) - stored as
+        // JSON text in the same analysis_text column single-stock write-ups
+        // use, and detected on read (AiHistory.jsx JSON.parses it back) so no
+        // schema change/migration is needed for the new shape.
+        const analysis = result.mode === "comparison" ? result.comparison : result.text;
+        const analysisText = result.mode === "comparison" ? JSON.stringify(result.comparison) : result.text;
         try {
-            await saveAiAnalysis(req.userId, parsed.data.stocks, analysis);
+            await saveAiAnalysis(req.userId, parsed.data.stocks, analysisText);
         } catch (err) {
             // Best-effort - a DB hiccup shouldn't hide the analysis the user is
             // already looking at, it just won't show up in their history later.
             console.error("[ai] failed to persist analysis history:", err.message);
         }
-        return res.json({ success: true, data: { analysis } });
+        return res.json({ success: true, data: { analysis, mode: result.mode } });
     } catch (err) {
         console.error("[ai] analyzeStocks failed:", err.message);
         return res.status(500).json({

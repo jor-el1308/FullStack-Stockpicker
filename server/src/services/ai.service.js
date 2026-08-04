@@ -3,7 +3,10 @@
  *
  * After a user shortlists stocks from the screener, this sends them to an
  * LLM for qualitative analysis (recent context, growth outlook, reasoning)
- * - requirement doc section 6.
+ * - requirement doc section 6. A single stock gets a free-text write-up;
+ * two or more stocks get a structured, head-to-head comparison (JSON) so the
+ * client can render an actual comparison table instead of the model just
+ * analyzing each stock on its own.
  *
  * The default tier (Gemini Flash) calls Google's Generative Language API
  * directly with AI_RECOMMENDATION_API_KEY - this is the one kept "live"
@@ -68,17 +71,12 @@ function getOpenRouterApiKey() {
 }
 
 /**
+ * "- Name (EXCH:CODE) — metric: value, ..." per stock, shared by both the
+ * single-stock and comparison prompts.
  * @param {Array<{exchangeCode: string, stockCode: string, stockName: string, values?: Record<string, number>}>} stocks
- * @param {{aiPersona?: string, aiDetailLevel?: string, customInstructions?: string}} [preferences]
- *   From ai_preferences (see aiPreferences.service.js) - steers the persona
- *   the write-up is framed as, how much detail to include, and any free-text
- *   instructions the user added on top. Falls back to the same defaults as
- *   the ai_preferences table (balanced/concise/none) when omitted.
  */
-function buildPrompt(stocks, preferences = {}) {
-    const { aiPersona = "balanced", aiDetailLevel = "concise", customInstructions = "" } = preferences;
-
-    const list = stocks
+function formatStockList(stocks) {
+    return stocks
         .map((s) => {
             const metrics = s.values
                 ? Object.entries(s.values)
@@ -88,29 +86,91 @@ function buildPrompt(stocks, preferences = {}) {
             return `- ${s.stockName} (${s.exchangeCode}:${s.stockCode}) — ${metrics}`;
         })
         .join("\n");
+}
+
+/**
+ * Resolves the persona/detail/custom-instructions preferences shared by both
+ * prompt templates. `detailInstructions` gives the concise/detailed wording
+ * per mode, since "3-4 sentences per stock" doesn't make sense for a
+ * comparison prompt's per-criterion notes.
+ * @param {{aiPersona?: string, aiDetailLevel?: string, customInstructions?: string}} preferences
+ * @param {{concise: string, detailed: string}} detailInstructions
+ */
+function resolvePreferences(preferences, detailInstructions) {
+    const { aiPersona = "balanced", aiDetailLevel = "concise", customInstructions = "" } = preferences;
 
     const personaDescription = PERSONAS[aiPersona] ?? PERSONAS.balanced;
-    const detailInstruction =
-        aiDetailLevel === "detailed"
-            ? "Be thorough: 5-7 sentences per stock, covering more nuance in your reasoning."
-            : "Keep each stock's write-up to 3-4 sentences.";
+    const detailInstruction = aiDetailLevel === "detailed" ? detailInstructions.detailed : detailInstructions.concise;
     const customInstructionsBlock = customInstructions.trim()
         ? `\nThe user also gave these additional instructions - follow them as long as they don't conflict with anything above:\n${customInstructions.trim()}\n`
         : "";
 
-    return `You are ${personaDescription}, helping a retail investor review a shortlist of stocks that just passed their screener criteria.
+    return { personaDescription, detailInstruction, customInstructionsBlock };
+}
 
-For EACH stock below, give a qualitative take covering:
+/**
+ * Prompt for a single shortlisted stock - a free-text qualitative write-up.
+ * @param {Array<{exchangeCode: string, stockCode: string, stockName: string, values?: Record<string, number>}>} stocks
+ * @param {{aiPersona?: string, aiDetailLevel?: string, customInstructions?: string}} [preferences]
+ *   From ai_preferences (see aiPreferences.service.js) - steers the persona
+ *   the write-up is framed as, how much detail to include, and any free-text
+ *   instructions the user added on top. Falls back to the same defaults as
+ *   the ai_preferences table (balanced/concise/none) when omitted.
+ */
+function buildSingleStockPrompt(stocks, preferences = {}) {
+    const { personaDescription, detailInstruction, customInstructionsBlock } = resolvePreferences(preferences, {
+        concise: "Keep the write-up to 3-4 sentences.",
+        detailed: "Be thorough: 5-7 sentences, covering more nuance in your reasoning.",
+    });
+
+    return `You are ${personaDescription}, helping a retail investor review a stock that just passed their screener criteria.
+
+Give a qualitative take covering:
 1. Recent news / context you're aware of (if none, say so - don't invent facts)
 2. Growth outlook (brief)
 3. 1-2 sentences of reasoning tying it back to the screener metrics given, viewed through your persona's priorities above
 
 ${detailInstruction} End with a one-line disclaimer that this is not financial advice.
 ${customInstructionsBlock}
-Respond in plain text only, no markdown or HTML. Do not use asterisks, underscores, backticks, or "#" headers for formatting. Use a stock's name followed by a colon to start each write-up, and a plain line breaks between stocks.
+Respond in plain text only, no markdown or HTML. Do not use asterisks, underscores, backticks, or "#" headers for formatting. Start with the stock's name followed by a colon.
+
+Shortlisted stock:
+${formatStockList(stocks)}`;
+}
+
+/**
+ * Prompt for two or more shortlisted stocks - a structured, head-to-head
+ * comparison instead of independent per-stock write-ups. Asks for strict
+ * JSON so the client can render an actual comparison table (see
+ * parseComparisonResponse below).
+ * @param {Array<{exchangeCode: string, stockCode: string, stockName: string, values?: Record<string, number>}>} stocks
+ * @param {{aiPersona?: string, aiDetailLevel?: string, customInstructions?: string}} [preferences]
+ */
+function buildComparisonPrompt(stocks, preferences = {}) {
+    const { personaDescription, detailInstruction, customInstructionsBlock } = resolvePreferences(preferences, {
+        concise: "Cover 4-5 comparison criteria, with one concise sentence per stock in each note.",
+        detailed: "Cover 6-8 comparison criteria, with 1-2 sentences of nuance per stock in each note.",
+    });
+    const names = stocks.map((s) => s.stockName);
+
+    return `You are ${personaDescription}, helping a retail investor directly compare a shortlist of stocks that just passed their screener criteria, side by side.
+
+Do not analyze each stock in isolation - every criterion must be a head-to-head comparison across ALL of the stocks below, tying back to the screener metrics given where relevant, and you must pick a winner for each criterion (or "Tie" if genuinely even), viewed through your persona's priorities above.
+
+${detailInstruction}
+${customInstructionsBlock}
+Respond with ONLY a single JSON object - no markdown code fences, no commentary before or after it - matching exactly this shape:
+{
+  "stocks": [${names.map((n) => JSON.stringify(n)).join(", ")}],
+  "criteria": [
+    { "name": "<criterion name>", "notes": ["<note for ${names[0]}>", "...one note per stock, same order as \\"stocks\\""], "winner": "<one of the stock names above, or \\"Tie\\">" }
+  ],
+  "summary": "<2-3 sentence overall take on which stock best fits the persona's priorities>",
+  "disclaimer": "This is not financial advice."
+}
 
 Shortlisted stocks:
-${list}`;
+${formatStockList(stocks)}`;
 }
 
 /**
@@ -118,11 +178,12 @@ ${list}`;
  * not to (Gemini does this fairly often, e.g. **bold** metric names or
  * "* " bullet lists). Strips the common markdown tokens while leaving the
  * words themselves intact, since the client renders this as plain
- * pre-wrapped text, not through a markdown renderer.
+ * pre-wrapped text, not through a markdown renderer. Only used for the
+ * free-text single-stock response - the comparison response is parsed as
+ * JSON instead.
  * @param {string} text
  * @returns {string}
  */
-
 function stripMarkdown(text) {
     return text
         // bold/italic: **text**, __text__, *text*, _text_ -> text
@@ -143,11 +204,33 @@ function stripMarkdown(text) {
 }
 
 /**
- * @param {Array<{exchangeCode: string, stockCode: string, stockName: string, values?: Record<string, number>}>} stocks
- * @param {{aiModelTier?: string, aiPersona?: string, aiDetailLevel?: string, customInstructions?: string}} [preferences]
- *   The caller's saved ai_preferences row (see aiPreferences.service.js).
- * @returns {Promise<string>} plain-text analysis
+ * Pulls the JSON object out of a comparison response and validates its
+ * shape. Slices between the first "{" and last "}" rather than
+ * `JSON.parse`-ing the whole string, since models sometimes wrap the object
+ * in a code fence or a stray sentence despite being told not to.
+ * @param {string} text
+ * @returns {{stocks: string[], criteria: Array<{name: string, notes: string[], winner: string}>, summary?: string, disclaimer?: string}}
  */
+function parseComparisonResponse(text) {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start === -1 || end === -1 || end < start) {
+        throw new Error("AI comparison response was not valid JSON");
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(text.slice(start, end + 1));
+    } catch {
+        throw new Error("Could not parse AI comparison response as JSON");
+    }
+
+    if (!Array.isArray(parsed.stocks) || !Array.isArray(parsed.criteria)) {
+        throw new Error("AI comparison response was missing the expected stocks/criteria fields");
+    }
+    return parsed;
+}
+
 /**
  * Direct call to Google's Generative Language API (no OpenRouter, no
  * credits needed - the free tier is enough for dev/demo use).
@@ -205,15 +288,28 @@ async function callOpenRouter(tier, prompt) {
     return data?.choices?.[0]?.message?.content ?? "";
 }
 
+/**
+ * @param {Array<{exchangeCode: string, stockCode: string, stockName: string, values?: Record<string, number>}>} stocks
+ * @param {{aiModelTier?: string, aiPersona?: string, aiDetailLevel?: string, customInstructions?: string}} [preferences]
+ *   The caller's saved ai_preferences row (see aiPreferences.service.js).
+ * @returns {Promise<{mode: "single", text: string} | {mode: "comparison", comparison: object}>}
+ *   A single shortlisted stock gets a free-text write-up (`mode: "single"`);
+ *   two or more get a structured head-to-head comparison (`mode:
+ *   "comparison"`) instead of independent per-stock analysis.
+ */
 export async function getQualitativeAnalysis(stocks, preferences = {}) {
     const { aiModelTier = "flash" } = preferences;
     const tier = MODEL_TIERS[aiModelTier] ?? MODEL_TIERS.flash;
-    const prompt = buildPrompt(stocks, preferences);
+    const isComparison = stocks.length > 1;
+    const prompt = isComparison ? buildComparisonPrompt(stocks, preferences) : buildSingleStockPrompt(stocks, preferences);
 
     const text = tier.provider === "gemini" ? await callGemini(prompt) : await callOpenRouter(tier, prompt);
 
     if (!text) {
         throw new Error("AI provider returned an empty response");
     }
-    return stripMarkdown(text);
+
+    return isComparison
+        ? { mode: "comparison", comparison: parseComparisonResponse(text) }
+        : { mode: "single", text: stripMarkdown(text) };
 }

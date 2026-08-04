@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Sparkles, Clock, Pencil, Trash2 } from "lucide-react";
 import { getAiHistory, updateAiHistoryEntry, deleteAiHistoryEntry } from "../api/ai";
+import AiComparisonTable from "../components/AiComparisonTable";
 
 function formatDateTime(value) {
   return new Date(value).toLocaleString(undefined, {
@@ -21,13 +22,32 @@ function formatDateTime(value) {
 }
 
 /**
+ * Runs analyzing 2+ stocks are saved as a structured comparison object
+ * (JSON.stringify'd - see ai.controller.js) rather than free text. Detects
+ * that shape on read so AiComparisonTable can render it, while older/
+ * single-stock rows (plain text) fall through to splitAnalysisByStock below.
+ * @param {string} analysisText
+ * @returns {{stocks: string[], criteria: Array<object>} | null}
+ */
+function parseComparison(analysisText) {
+  try {
+    const parsed = JSON.parse(analysisText);
+    if (parsed && Array.isArray(parsed.stocks) && Array.isArray(parsed.criteria)) return parsed;
+  } catch {
+    // Not JSON - a normal free-text single-stock write-up.
+  }
+  return null;
+}
+
+/**
  * The stored analysis_text is one block covering every shortlisted stock,
  * each write-up starting with "<Stock Name>:" (see ai.service.js's prompt).
  * Splits that block back into per-stock segments by finding where each
  * stock's name appears, in the order they appear in the text. Falls back to
  * a single "whole thing" segment if none of the names can be found (e.g. the
  * model paraphrased a name, or the text was hand-edited) so the analysis is
- * never hidden.
+ * never hidden. Only used for single-stock runs - comparisons are rendered
+ * via AiComparisonTable instead (see parseComparison above).
  * @param {string} analysisText
  * @param {Array<{stockName: string}>} stocks
  */
@@ -77,9 +97,10 @@ const textAreaStyle = {
 function HistoryEntry({ entry, onDeleted }) {
   const [title, setTitle] = useState(entry.title);
   const [analysisText, setAnalysisText] = useState(entry.analysisText);
+  const comparison = useMemo(() => parseComparison(analysisText), [analysisText]);
   const segments = useMemo(
-    () => splitAnalysisByStock(analysisText, entry.stocks),
-    [analysisText, entry.stocks]
+    () => (comparison ? [] : splitAnalysisByStock(analysisText, entry.stocks)),
+    [comparison, analysisText, entry.stocks]
   );
   const [activeIndex, setActiveIndex] = useState(0);
   const active = segments[Math.min(activeIndex, Math.max(segments.length - 1, 0))];
@@ -284,6 +305,8 @@ function HistoryEntry({ entry, onDeleted }) {
             </button>
           </div>
         </div>
+      ) : comparison ? (
+        <AiComparisonTable comparison={comparison} />
       ) : (
         active && (
           <div

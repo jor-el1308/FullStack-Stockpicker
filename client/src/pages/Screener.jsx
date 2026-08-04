@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { SlidersHorizontal, Play, Bookmark, RefreshCw, Sparkles, X } from "lucide-react";
 import ResultsTable from "../components/ResultsTable";
+import AiComparisonTable from "../components/AiComparisonTable";
 import { useScreener } from "../context/ScreenerContext";
 import { useAuth } from "../context/AuthContext";
 import { saveScreen } from "../api/stocks";
@@ -44,6 +45,7 @@ export default function Screener() {
   // qualitative analysis.
   const [selectedKeys, setSelectedKeys] = useState(new Set());
   const [analysis, setAnalysis] = useState(null);
+  const [analysisMode, setAnalysisMode] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState(null);
 
@@ -70,9 +72,11 @@ export default function Screener() {
     setAnalyzing(true);
     setAnalyzeError(null);
     setAnalysis(null);
+    setAnalysisMode(null);
     try {
-      const { analysis } = await analyzeStocks(selectedRows);
+      const { analysis, mode } = await analyzeStocks(selectedRows);
       setAnalysis(analysis);
+      setAnalysisMode(mode);
     } catch (err) {
       setAnalyzeError(err.message);
     } finally {
@@ -98,6 +102,7 @@ export default function Screener() {
   useEffect(() => {
     setSelectedKeys(new Set());
     setAnalysis(null);
+    setAnalysisMode(null);
     setAnalyzeError(null);
   }, [results]);
 
@@ -271,7 +276,7 @@ export default function Screener() {
         {results && results.length > 0 && (
           <p className="page-subtitle" style={{ padding: "10px 16px 0" }}>
             Tick rows to shortlist up to {MAX_AI_SELECTION} stocks, then click "Analyze with AI" above for a
-            qualitative take on each.
+            qualitative take on a single stock, or a structured comparison when you select more than one.
           </p>
         )}
         <div style={{ overflowX: "auto", padding: "0 8px 8px" }}>
@@ -316,6 +321,7 @@ export default function Screener() {
               className="btn btn-secondary"
               onClick={() => {
                 setAnalysis(null);
+                setAnalysisMode(null);
                 setAnalyzeError(null);
               }}
               style={{ padding: "4px 8px" }}
@@ -337,14 +343,16 @@ export default function Screener() {
             </div>
           )}
 
-          {analysis && (
+          {analysis && analysisMode === "comparison" && <AiComparisonTable comparison={analysis} />}
+
+          {analysis && analysisMode !== "comparison" && (
             <div
               style={{
                 marginTop: 12,
                 fontFamily: "var(--font-body)",
                 fontSize: 14,
                 lineHeight: 1.6,
-                color: "var(--color-dark-menu)",
+                color: "var(--color-text)",
                 whiteSpace: "pre-wrap",
               }}
             >
