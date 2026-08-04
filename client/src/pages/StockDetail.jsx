@@ -85,7 +85,15 @@ export default function StockDetail() {
       .then(([detailRes, pricesRes]) => {
         if (seq !== requestSeq.current) return;
         setDetail(detailRes);
-        setPrices(pricesRes ?? []);
+        // Sort ascending by date so the chart reads left-to-right and the
+        // current-price / day-change logic below (which treats the last
+        // element as the most recent close) is correct no matter what order
+        // the /prices endpoint returns rows in - it currently returns them
+        // newest-first, which would otherwise reverse the chart.
+        const ordered = [...(pricesRes ?? [])].sort((a, b) =>
+          String(a.date).localeCompare(String(b.date))
+        );
+        setPrices(ordered);
       })
       .catch((err) => {
         if (seq === requestSeq.current) setError(err.message);

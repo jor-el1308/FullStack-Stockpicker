@@ -3,13 +3,13 @@
  * Fetches screener results and renders them via ResultsTable.
  * Clicking a row navigates to /stock/:exchangeCode/:stockCode (StockDetail.jsx).
  */
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { fonts, fontWeights } from "../theme";
+import { colors, fonts, fontWeights } from "../theme";
 import ResultsTable from "../components/ResultsTable";
 import { getStocks } from "../api/stocks";
 
-const NEUTRAL = { textMuted: "var(--color-muted-text)", bad: "#D16B6B" };
+const NEUTRAL = { textMuted: "var(--color-muted-text)" };
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -48,7 +48,7 @@ export default function Dashboard() {
       )}
 
       {error && (
-        <p style={{ fontFamily: fonts.description, color: NEUTRAL.bad }}>
+        <p style={{ fontFamily: fonts.description, color: colors.badNumber }}>
           Couldn't load screener results. {error}
         </p>
       )}
