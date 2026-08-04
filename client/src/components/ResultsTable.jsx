@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { colors, fonts } from "../theme";
 import { labelFor, formatValue } from "../screener/criteria";
 
@@ -45,8 +45,13 @@ export default function ResultsTable({
     );
   }
 
-  const criteriaKeys = Array.from(new Set(rows.flatMap((r) => Object.keys(r.values))));
-  const hasScore = rows.some((r) => r.score != null);
+  // Derived from the full row set, not the current page - memoized so paging
+  // (which only changes `page`) doesn't re-scan every row on each render.
+  const criteriaKeys = useMemo(
+    () => Array.from(new Set(rows.flatMap((r) => Object.keys(r.values)))),
+    [rows]
+  );
+  const hasScore = useMemo(() => rows.some((r) => r.score != null), [rows]);
 
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -77,6 +82,19 @@ export default function ResultsTable({
               <tr
                 key={rowKey}
                 onClick={() => onRowClick?.(row)}
+                onKeyDown={
+                  onRowClick
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onRowClick(row);
+                        }
+                      }
+                    : undefined
+                }
+                tabIndex={onRowClick ? 0 : undefined}
+                role={onRowClick ? "button" : undefined}
+                aria-label={onRowClick ? `View ${row.stockName}` : undefined}
                 style={{ cursor: onRowClick ? "pointer" : "default" }}
               >
                 {selectable && (
@@ -172,4 +190,3 @@ function pagerButtonStyle(disabled) {
     opacity: disabled ? 0.5 : 1,
   };
 }
-

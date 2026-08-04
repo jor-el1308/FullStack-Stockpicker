@@ -22,14 +22,17 @@ async function request(path, options) {
     },
   });
 
+  const text = await res.text();
+  if (!text) return null;
+
   let json;
   try {
-    json = await res.json();
+    json = JSON.parse(text);
   } catch {
     throw new Error(`Request to ${path} failed (status ${res.status})`);
   }
 
-  if (!json.success) {
+  if (!json.success || json.data === undefined) {
     throw new Error(json.error?.message ?? `Request to ${path} failed`);
   }
   return json.data;
