@@ -263,3 +263,44 @@ CREATE TABLE IF NOT EXISTS reseed_schedule (
   last_reseed_at_ms BIGINT NULL DEFAULT NULL,
   updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------------
+-- AI Analysis Recommendation History (Person 1)
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ai_analysis (
+  id            CHAR(36) PRIMARY KEY DEFAULT (UUID()),
+  user_id       CHAR(36) NOT NULL,
+  -- User-facing label for the run - auto-generated from the shortlisted
+  -- stock codes when the analysis is saved, renameable afterwards from the
+  -- AiHistory page (PATCH /api/ai/history/:id).
+  title         VARCHAR(200) NOT NULL,
+  -- The shortlisted stocks sent to the model, kept so the history page can
+  -- show what was analyzed without re-joining against live screener data.
+  stocks        JSON NOT NULL,
+  -- Editable after the fact (PATCH /api/ai/history/:id) so users can
+  -- annotate or correct the model's write-up - this is not re-derived from
+  -- the model on edit, it's just user-owned text from that point on.
+  analysis_text MEDIUMTEXT NOT NULL,
+  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ai_analysis_user FOREIGN KEY (user_id)
+    REFERENCES users (id) ON DELETE CASCADE,
+  INDEX idx_ai_analysis_user_created (user_id, created_at)
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------------
+-- AI Preferences (Person 1) - one row per user, read by ai.service.js to
+-- steer model/persona/output-length choices for the AI analysis feature.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ai_preferences (
+  user_id             CHAR(36) PRIMARY KEY,
+  ai_model_tier       VARCHAR(32) NOT NULL DEFAULT 'flash',
+  ai_persona          VARCHAR(32) NOT NULL DEFAULT 'balanced',
+  ai_detail_level     VARCHAR(16) NOT NULL DEFAULT 'concise',
+  -- Free-text steering the user can add on top of persona/detail level,
+  -- e.g. "focus on ASX-listed stocks". Optional, so NULL/empty is valid.
+  custom_instructions VARCHAR(1000) NULL,
+  created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ai_preferences_user FOREIGN KEY (user_id)
+    REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB;
