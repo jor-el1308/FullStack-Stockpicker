@@ -1,8 +1,8 @@
-# API Documentation — AI Stock Analysis
+# API Documentation — AI Stock Analysis & Google OAuth
 
 **Owner:** Yong Wee (Person 1)
 
-Endpoints for the AI qualitative-analysis feature: running an analysis on shortlisted stocks, managing saved analysis history, and reading/updating a user's AI preferences. Implemented in `server/src/routes/ai.routes.js`, `server/src/controllers/{ai,aiPreferences}.controller.js`, and `server/src/services/{ai,aiHistory,aiPreferences}.service.js`.
+Two features: (1) the AI qualitative-analysis feature — running an analysis on shortlisted stocks, managing saved analysis history, and reading/updating a user's AI preferences (`server/src/routes/ai.routes.js`, `server/src/controllers/{ai,aiPreferences}.controller.js`, `server/src/services/{ai,aiHistory,aiPreferences}.service.js`); and (2) "Sign in with Google" — an alternate, password-less way to log in or sign up (`server/src/routes/auth.routes.js`'s `/oauth/google*` routes, `server/src/controllers/auth.controller.js`'s `googleOAuthStart`/`googleOAuthCallback`, `server/src/services/googleOAuth.service.js`, `server/src/services/auth.service.js`'s `findOrCreateGoogleUser`).
 
 ## Conventions
 
@@ -253,3 +253,56 @@ All error bodies follow `{ "success": false, "error": { "message": string, "code
 1. **Model/provider configuration is server-side only.** Which provider (`gemini` vs `openrouter`) and which underlying model a tier maps to lives in `MODEL_TIERS` (`ai.service.js`) — the client only ever sends/receives the tier id string (`"flash"`, `"gpt-4o-mini"`, etc.), never a raw model name or API key.
 2. **Environment variables required:** `AI_RECOMMENDATION_API_KEY` (Google Gemini, used for the default `"flash"` tier) and `OPENROUTER_API_KEY` (OpenRouter, used for `"gpt-4o-mini"`, `"claude-haiku"`, `"deepseek-chat"`) — see `server/.env.example`. Analysis requests fail with `500` if the key for the selected tier is missing.
 3. **`values` on each stock in `POST /api/ai/analyze` is optional but recommended** — it's the screener metric values (market cap, P/E, etc.) that get woven into the prompt so the model's reasoning ties back to *why* the stock passed the screen, not just its name.
+
+---
+
+# Google OAuth ("Sign in with Google")
+
+Lets a user log in (or, on first use, sign up) with their Google account instead of an email/password. Implemented in `server/src/routes/auth.routes.js` (`/oauth/google*`), `server/src/controllers/auth.controller.js` (`googleOAuthStart`/`googleOAuthCallback`), `server/src/services/googleOAuth.service.js` (talking to Google), and `server/src/services/auth.service.js`'s `findOrCreateGoogleUser` (matching/creating the local account).
+
+## Conventions
+
+Unlike every other endpoint in this document, these two are **not** JSON APIs — they're full-page browser navigations (the client's Google button, `client/src/pages/Login.jsx`, is a plain `<a href="/api/auth/oauth/google">`, not a `fetch` call), because the browser has to actually visit Google's consent screen. Both routes always respond with an HTTP redirect, never a JSON body.
+
+## 1. `GET /api/auth/oauth/google`
+
+Starts the flow. Generates a random CSRF `state` value, stores it in a short-lived (5 minute) httpOnly cookie (`g_oauth_state`), and redirects the browser to Google's OAuth 2.0 consent screen (`accounts.google.com/o/oauth2/v2/auth`) with `client_id`/`redirect_uri` from `GOOGLE_CLIENT_ID`/`GOOGLE_REDIRECT_URI`, `scope=openid email profile`, `prompt=select_account`, and that same `state`.
+
+- **Auth:** none (this *is* the login entry point).
+- **Rate limit:** `loginLimiter` (same as `POST /auth/login`).
+- **Response:** `302` to Google. On misconfiguration (e.g. `GOOGLE_CLIENT_ID` unset), `302` back to `/login?oauth=error&message=...` instead of throwing a raw `500`.
+
+## 2. `GET /api/auth/oauth/google/callback`
+
+Where Google redirects the browser back to after the user grants or denies consent. Must exactly match `GOOGLE_REDIRECT_URI` as configured in the Google Cloud Console.
+
+- **Auth:** none.
+- **Rate limit:** `loginLimiter`.
+- **Query params (from Google):** `code` (authorization code, present on consent) *or* `error` (e.g. `access_denied`, present on denial), plus the `state` echoed back unchanged.
+- **Main flow:**
+  1. Clears the `g_oauth_state` cookie unconditionally (single-use).
+  2. If `error` is present, or `code`/`state` is missing, or `state` doesn't match the cookie (CSRF check) → redirect to `/login?oauth=error&message=<reason>`. `exchangeCodeForProfile`/`findOrCreateGoogleUser` are never called in this branch.
+  3. Otherwise: exchanges `code` for an access token, fetches the verified Google profile (`sub`, `email`, `email_verified`, `name`, `picture`) via `googleOAuth.service.js`'s `exchangeCodeForProfile`.
+  4. `authService.findOrCreateGoogleUser(profile)` matches an existing account by `google_id`, else links onto an existing password account by (Google-verified) email, else creates a brand-new account with no password.
+  5. Issues a normal session JWT (`authService.issueToken`) and sets it on the same httpOnly `token` cookie password login uses — **no email-OTP second factor** here, since Google has already authenticated the user.
+  6. Redirects to `${OAUTH_SUCCESS_REDIRECT}/login?oauth=success`.
+- **Response:**
+  - **Success:** `302` to `/login?oauth=success` + the `token` session cookie set. The client then calls `GET /api/auth/me` to fetch the now-logged-in user (see `client/src/pages/Login.jsx`).
+  - **Failure** (denied consent, CSRF mismatch, missing code, failed token exchange, unverified email, DB error): `302` to `/login?oauth=error&message=<human-readable reason>`. No cookie is set.
+
+## Error handling
+
+| Situation | Redirect target | Notes |
+|---|---|---|
+| User clicks "Cancel" on Google's consent screen | `/login?oauth=error&message=Google+sign-in+was+cancelled` | Google sends `?error=access_denied` |
+| `state` cookie missing/expired or doesn't match | `/login?oauth=error&message=Google+sign-in+session+expired...` | CSRF protection — see `googleOAuth.service.js`'s `generateOAuthState()` doc comment |
+| Google account has no verified email | `/login?oauth=error&message=Google+sign-in+failed...` | `exchangeCodeForProfile` rejects before any DB write |
+| Token exchange / profile fetch HTTP failure | `/login?oauth=error&message=Google+sign-in+failed...` | Logged server-side with the real error; client only sees the generic message |
+| Everything else (DB error, etc.) | `/login?oauth=error&message=Google+sign-in+failed...` | Same generic message, real error logged as `[auth] googleOAuthCallback failed: ...` |
+
+## Integration notes
+
+1. **No Google JS SDK on the client.** This is the classic server-side OAuth 2.0 authorization code flow — the "Continue with Google" button is a plain link, not a `google.accounts.id.initialize(...)` call.
+2. **Environment variables required:** `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `OAUTH_SUCCESS_REDIRECT` — see `server/.env.example` for how to obtain them from the Google Cloud Console.
+3. **Account linking is by verified email, not user choice.** If someone already has a password account under `ada@example.com` and signs in with a Google account using that same address, the two are silently merged (the Google id is attached to the existing account) rather than erroring or creating a duplicate — safe because Google has already verified ownership of that address.
+4. **Google-only accounts have `password_hash = NULL`** (migration `014_add_google_oauth.sql`) — they can't use `POST /auth/login` until/unless a "set a password" flow is added; today, Google is their only way in.

@@ -1,8 +1,8 @@
-# Use Cases — AI Stock Analysis
+# Use Cases — AI Stock Analysis & Google OAuth
 
-**Owner:** Yong Wee (Person 1) · **Features:** "Analyze with AI" on the Screener (`server/src/{routes,controllers,services}/ai.*`), AI Analysis History (`client/src/pages/AiHistory.jsx`), AI Preferences (Settings → "AI preferences" tab)
+**Owner:** Yong Wee (Person 1) · **Features:** "Analyze with AI" on the Screener (`server/src/{routes,controllers,services}/ai.*`), AI Analysis History (`client/src/pages/AiHistory.jsx`), AI Preferences (Settings → "AI preferences" tab), "Sign in with Google" (`server/src/{routes,controllers}/auth.*`, `server/src/services/googleOAuth.service.js`, `client/src/pages/Login.jsx`)
 
-These are the use cases for the AI qualitative-analysis feature: after a user shortlists stocks from the screener results, the app sends them to an LLM for a qualitative take (recent context, growth outlook, reasoning), lets the user revisit/edit/delete past runs, and lets them tune how the model analyzes (model tier, persona, detail level, custom instructions).
+Two sets of use cases. UC-01 through UC-07 cover the AI qualitative-analysis feature: after a user shortlists stocks from the screener results, the app sends them to an LLM for a qualitative take (recent context, growth outlook, reasoning), lets the user revisit/edit/delete past runs, and lets them tune how the model analyzes (model tier, persona, detail level, custom instructions). UC-08 through UC-10 cover "Sign in with Google": logging in or signing up with a Google account instead of email/password.
 
 ## Actors
 
@@ -14,6 +14,8 @@ Every `/api/ai/*` route requires authentication (`requireAuth`) **and** an activ
 | **Inactive user** | Logged in, unpaid (`is_active = 0`) | Blocked — API `402 ACCOUNT_INACTIVE`, redirected to `/activate` |
 | **Subscriber** | Logged in, active | Full access — primary actor below |
 | **Admin** | Logged in, active, admin | Same access as Subscriber (no elevated AI privileges) |
+
+The Google OAuth routes (`/api/auth/oauth/google*`, UC-08–UC-10) are the odd one out: they're deliberately reachable by a **Visitor** with no auth at all — they're an entry point *into* being logged in, same as `POST /auth/login`/`POST /auth/signup`, not a feature gated behind login.
 
 ---
 
@@ -117,6 +119,45 @@ Every `/api/ai/*` route requires authentication (`requireAuth`) **and** an activ
 
 ---
 
+## UC-08 — Sign up / log in with a Google account (first time)
+
+- **Actor:** Visitor (not logged in, and this is the first time they've ever used this Google account with the app — neither `google_id` nor their Google email exists in `users`).
+- **Trigger:** User clicks the white "Continue with Google" button under the login/signup form on `/login`.
+- **Preconditions:** None — this button is the same for both the "login" and "signup" modes of the form, since a first-time Google sign-in *is* the signup.
+- **Main flow:**
+  1. The browser navigates (full page load, not a fetch) to `GET /api/auth/oauth/google`, which stashes a CSRF `state` value in a short-lived cookie and redirects to Google's consent screen.
+  2. The user picks a Google account and grants access (`select_account` is forced, so a shared machine doesn't silently reuse whichever Google session is already active).
+  3. Google redirects back to `GET /api/auth/oauth/google/callback` with an authorization `code`.
+  4. The server verifies the CSRF `state`, exchanges the code for the user's verified Google profile, finds no matching `google_id` or email, and creates a brand-new account (`password_hash = NULL` — see migration 014) with `is_active = 0` like any other new signup.
+  5. A normal session cookie is issued (no email-OTP step — see UC-09's note) and the browser is redirected to `/login?oauth=success`.
+  6. The client fetches `GET /api/auth/me`, logs the user in, and — since the new account isn't active yet — routes to `/activate`, same as a fresh password signup.
+- **Postcondition:** A new `users` row exists, linked to the Google account; the user is logged in and on the paywall page.
+- **Alternate / edge flows:**
+  - *E1 — User cancels/denies consent on Google's screen:* redirected to `/login?oauth=error&message=Google+sign-in+was+cancelled`, shown inline; no account is created.
+  - *E2 — Google account has no verified email:* rejected before any account is touched; generic "Google sign-in failed" message (doesn't reveal *why*, to avoid leaking account-enumeration-adjacent detail).
+
+## UC-09 — Log in with a Google account (returning user)
+
+- **Actor:** Visitor whose Google account is already linked (`google_id` matches an existing row).
+- **Trigger:** Same "Continue with Google" button.
+- **Main flow:** Same steps as UC-08, except step 4 finds the existing account by `google_id` immediately and step 6 routes to `/` (screener) instead of `/activate` if the account is already active, or `/activate` if it isn't (e.g. a lapsed subscription) — identical branching to a normal password login's `finishLogin()`.
+- **Postcondition:** The existing user is logged in.
+- **Note (design decision, flagged for review):** Google sign-in does **not** go through the app's email-OTP second factor (`verifyLoginOtp` — see the AI feature's sibling auth flow / `auth.controller.js`'s `login()`). Google has already authenticated the user (and enforces its own 2FA if the user has that turned on for their Google account), so a second emailed code would be redundant friction rather than added security.
+
+## UC-10 — Google sign-in on an email that already has a password account
+
+- **Actor:** Visitor with an existing password-based account under the same email as the Google account they sign in with.
+- **Trigger:** Same "Continue with Google" button, using a Google account whose (verified) email matches an existing `users.email`, but whose `google_id` has never been seen before.
+- **Main flow:**
+  1. Steps 1–3 as UC-08.
+  2. The server finds no `google_id` match, but finds an existing account by email. Because Google has already verified the caller controls that email address, the accounts are treated as the same person: `google_id` is written onto the existing row rather than creating a duplicate account.
+  3. From then on, that account can be logged into with **either** the original password (`POST /auth/login`, still going through email-OTP) **or** this Google account (skipping OTP, per UC-09's note) — both reach the same `users` row.
+- **Postcondition:** One account, now reachable two ways; no duplicate account is created.
+- **Alternate / edge flows:**
+  - *E1 — The email match happens between two different people (unlikely, since Google verifies the address):* out of scope — this app trusts Google's `email_verified` claim the same way `email-change/verify` trusts its own OTP as proof of address ownership.
+
+---
+
 ## Edge-case coverage summary
 
 | Condition | Handled in | Result |
@@ -135,3 +176,8 @@ Every `/api/ai/*` route requires authentication (`requireAuth`) **and** an activ
 | Custom instructions over 1000 characters | Client `slice()` cap + server zod `max(1000)` | Truncated client-side; `400` if bypassed |
 | Unauthenticated | `requireAuth` + API `401` | Redirect to `/login` |
 | Inactive / unpaid account | `requireActiveAccount` + API `402` | Redirect to `/activate` |
+| User denies/cancels Google consent | `googleOAuthCallback` (`error` query param) | Redirect to `/login?oauth=error&message=...`; no account touched |
+| Forged/replayed/expired OAuth callback (`state` missing or mismatched) | `googleOAuthCallback` CSRF check | Redirect to `/login?oauth=error&message=...`; code exchange never attempted |
+| Google account has no verified email | `googleOAuth.service.js` `exchangeCodeForProfile` | Redirect to `/login?oauth=error&message=...`; no account touched |
+| Google email matches an existing password account | `auth.service.js` `findOrCreateGoogleUser` | `google_id` linked onto the existing row, not duplicated (see UC-10) |
+| `GET /auth/me` fails right after a successful OAuth redirect | `Login.jsx`'s `oauth=success` effect | Inline "Google sign-in failed" message; user not marked logged in client-side |

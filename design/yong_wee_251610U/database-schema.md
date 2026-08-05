@@ -1,8 +1,8 @@
-# Database Schema — AI Stock Analysis
+# Database Schema — AI Stock Analysis & Google OAuth
 
 **Owner:** Yong Wee (Person 1)
 
-The two tables that back the AI analysis feature, both defined in `server/src/db/schema.sql` (and originally introduced by `server/src/db/migrations/011_add_ai_analysis_history.sql`, `012_add_ai_analysis_title.sql`, and `013_add_ai_preferences.sql`). Both reference `users(id)`, which is shared infrastructure — its `id`/`email`/`password_hash`/`name`/`avatar` columns are owned by this feature's auth half (Person 1), while `is_active`/subscription columns belong to Person 2's paywall. Column names below are the raw SQL names; the API layer aliases them to camelCase (e.g. `analysis_text` → `analysisText`).
+Two features' worth of schema. The two tables that back the AI analysis feature are defined in `server/src/db/schema.sql` (and originally introduced by `server/src/db/migrations/011_add_ai_analysis_history.sql`, `012_add_ai_analysis_title.sql`, and `013_add_ai_preferences.sql`). "Sign in with Google" doesn't add a new table — it extends the shared `users` table (see `server/src/db/migrations/014_add_google_oauth.sql`). All three reference/live on `users(id)`, which is shared infrastructure — its `id`/`email`/`password_hash`/`google_id`/`name`/`avatar` columns are owned by this feature's auth half (Person 1), while `is_active`/subscription columns belong to Person 2's paywall. Column names below are the raw SQL names; the API layer aliases them to camelCase (e.g. `analysis_text` → `analysisText`).
 
 ## Tables I own
 
@@ -62,3 +62,18 @@ Both tables reference `users(id)` with `ON DELETE CASCADE`, so deleting a user's
 ## Ownership note
 
 `ai_analysis` and `ai_preferences` are both fully owned and written to only by this feature — no other person's code reads or writes them. They both hang off `users(id)`, whose table definition lives in the shared `server/src/db/schema.sql` (created collaboratively — see that file's inline ownership comments per column). The full, system-wide ER diagram is the group's shared artefact in `design/er-diagram.md`.
+
+---
+
+## `users` — Google OAuth columns (migration 014)
+
+"Sign in with Google" doesn't introduce a new table; it extends the existing shared `users` table with two changes, both in `server/src/db/migrations/014_add_google_oauth.sql` (and mirrored directly in `schema.sql` for fresh installs):
+
+| Column | Type | Null | Key | Notes |
+|---|---|---|---|---|
+| `google_id` | VARCHAR(255) | Yes | UNIQUE | The stable Google account id (`sub` claim). `NULL` for password-only accounts. Set the first time a user signs in with Google — either on a brand-new row, or written onto an existing password account that shares the same (Google-verified) email. See `auth.service.js`'s `findOrCreateGoogleUser()`. |
+| `password_hash` | VARCHAR(255) | **Yes** (was `NOT NULL`) | | Relaxed to nullable. A Google-only account (no `google_id` match *and* no matching-email password account existed) is created with `password_hash = NULL` — there's nothing to hash since Google is its only way to authenticate. |
+
+- **Why not a separate `google_id` on its own table?** One Google account maps to exactly one app account, same cardinality as `email` — a column on `users` with a `UNIQUE` constraint is the simplest way to enforce "a given Google identity can only ever be linked to one account" at the database level, same reasoning as `email UNIQUE`.
+- **Backward compatibility:** every pre-existing row keeps `google_id = NULL` and its existing `password_hash` — nothing about password login changes. The migration is idempotent (checks `information_schema` before altering), same pattern as the other numbered migrations in this directory.
+- **Edge case not yet covered:** account-deletion/password-change re-confirm the current password (`authService.verifyPassword`) before proceeding — a Google-only account (`password_hash = NULL`) has no password to re-confirm with, so those two flows are not yet reachable for a Google-only user. Out of scope for this pass; would need a "set a password" flow first.
