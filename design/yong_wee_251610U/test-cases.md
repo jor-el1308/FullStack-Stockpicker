@@ -1,8 +1,13 @@
-# Test Cases — AI Stock Analysis
+# Test Cases — AI Stock Analysis & Google OAuth
 
 **Owner:** Yong Wee (Person 1) · **Framework:** Vitest (backend: Node environment + mocked MySQL pool/fetch; frontend: Vitest + React Testing Library / jsdom)
 
-Backend and frontend unit tests for the AI qualitative-analysis feature: `ai.service.js` (prompt building + Gemini/OpenRouter calls), `aiHistory.service.js` / `aiPreferences.service.js` (persistence), `ai.controller.js` / `aiPreferences.controller.js` (validation + HTTP mapping), and the React side (`AiComparisonTable`, `AiHistory`, the "Analyze with AI" flow on `Screener`, and the `api/ai.js` / `api/aiPreferences.js` clients). **All 72 tests pass** (44 backend + 28 frontend).
+Backend and frontend unit tests for two features:
+
+- **AI qualitative analysis:** `ai.service.js` (prompt building + Gemini/OpenRouter calls), `aiHistory.service.js` / `aiPreferences.service.js` (persistence), `ai.controller.js` / `aiPreferences.controller.js` (validation + HTTP mapping), and the React side (`AiComparisonTable`, `AiHistory`, the "Analyze with AI" flow on `Screener`, and the `api/ai.js` / `api/aiPreferences.js` clients).
+- **"Sign in with Google":** `googleOAuth.service.js` (Google URL building, state generation, code-for-profile exchange), `auth.service.js`'s `findOrCreateGoogleUser`/`findUserByGoogleId` (account matching/linking/creation), `auth.controller.js`'s `googleOAuthStart`/`googleOAuthCallback` (the CSRF state cookie round trip, error redirects, session cookie issuance), and the React side (the Google button + the `?oauth=success|error` redirect handling on `Login.jsx`).
+
+**All 98 tests pass** (64 backend + 34 frontend), of which 20 backend + 6 frontend are new for Google OAuth. (These counts are scoped to this owner's test files, `server/tests/yong_wee_251610U/` and `client/tests/yong_wee_251610U/` — running `npm test` in `client/` also runs other owners' tests alongside these.)
 
 ## How to run
 
@@ -21,7 +26,7 @@ npm test        # runs client/tests/**/*.test.jsx once
 npm run test:watch   # re-runs on change
 ```
 
-Or from the repo root: `npm test --workspace=server` / `npm test --workspace=client`. Test files live in `server/tests/yong_wee_251610U/` and `client/tests/yong_wee_251610U/`. No real database, network call, or AI API key is needed for any of these — the MySQL pool, `fetch`, and the API-client modules are all mocked (see Notes).
+Or from the repo root: `npm test --workspace=server` / `npm test --workspace=client`. Test files live in `server/tests/yong_wee_251610U/` and `client/tests/yong_wee_251610U/`. No real database, network call, AI API key, or Google OAuth credentials are needed for any of these — the MySQL pool, `fetch`, and the API-client/service modules are all mocked (see Notes).
 
 ---
 
@@ -106,6 +111,47 @@ Zod validation of `PATCH /api/ai/preferences` (enum fields, length limit, "at le
 | 5 | over-length custom instructions | >1000 characters | `400`; service never called |
 | 6 | valid partial patch | One field changed | Service called with exactly that field; `200` with the merged result |
 
+### `googleOAuth.service.js` (`googleOAuth.service.test.js`) — 8 cases
+
+Building the Google consent URL, generating the CSRF `state` value, and exchanging an authorization code for a verified profile. `global.fetch` is stubbed.
+
+| # | Test | What it checks | Expected outcome |
+|---|---|---|---|
+| 1 | state uniqueness | `generateOAuthState` called twice | Two different, URL-safe, non-trivially-short values |
+| 2 | auth URL shape | `buildGoogleAuthUrl` with a given state | Points at `accounts.google.com/o/oauth2/v2/auth` with correct `client_id`/`redirect_uri`/`response_type`/`scope`/`state` |
+| 3 | missing client id | `GOOGLE_CLIENT_ID` unset | Throws `/GOOGLE_CLIENT_ID is not set/` |
+| 4 | code exchange happy path | Valid code | Token endpoint called with `code`/`client_secret`/`grant_type`; userinfo endpoint called with `Authorization: Bearer <access_token>`; returns `{googleId, email, name, avatar}` |
+| 5 | email normalization / fallbacks | Profile has no `name`/`picture` | Email lower-cased; `name` falls back to the email; `avatar` is `null` |
+| 6 | token exchange HTTP failure | Non-2xx from the token endpoint | Rejects with `/token exchange failed \(400\)/` |
+| 7 | userinfo HTTP failure | Non-2xx from the userinfo endpoint | Rejects with `/profile fetch failed \(401\)/` |
+| 8 | unverified email | `email_verified: false` | Rejects with `/no verified email/` |
+
+### `auth.service.js` — Google persistence (`googleOAuthUser.service.test.js`) — 4 cases
+
+`findUserByGoogleId` and `findOrCreateGoogleUser` — account matching/linking/creation. `pool` is mocked.
+
+| # | Test | What it checks | Expected outcome |
+|---|---|---|---|
+| 1 | lookup by google_id, no match | `findUserByGoogleId` with an unknown id | Returns `null`; SQL filters on `google_id = ?` |
+| 2 | repeat sign-in | `google_id` already linked to a user | Returns that user immediately; only one query runs (no email lookup, no write) |
+| 3 | link onto existing password account | No `google_id` match, but the email matches an existing account | `UPDATE users SET google_id = ?` runs on that row's id; returns the refreshed user |
+| 4 | brand-new account | Neither `google_id` nor email matches | `INSERT INTO users` runs with `google_id` set and no password; returns the newly created user |
+
+### `auth.controller.js` — Google OAuth (`googleOAuth.controller.test.js`) — 8 cases
+
+`googleOAuthStart`/`googleOAuthCallback` — the CSRF state cookie round trip, every error-redirect branch, and the happy path. `googleOAuth.service.js` and the Google half of `auth.service.js` are mocked.
+
+| # | Test | What it checks | Expected outcome |
+|---|---|---|---|
+| 1 | start: happy path | `googleOAuthStart` | Sets `g_oauth_state` httpOnly cookie; redirects to the built Google URL |
+| 2 | start: misconfiguration | `generateOAuthState` throws (e.g. missing client id) | Redirects to `/login?oauth=error` instead of crashing |
+| 3 | callback: consent denied | `?error=access_denied` | Redirects with `oauth=error&message=Google+sign-in+was+cancelled`; `exchangeCodeForProfile` never called |
+| 4 | callback: state mismatch (CSRF) | `state` query param ≠ `g_oauth_state` cookie | Redirects with a "session expired" message; `exchangeCodeForProfile` never called |
+| 5 | callback: missing code | No `code` in the query string | Same "session expired" redirect |
+| 6 | callback: state cookie always cleared | Any callback outcome | `res.clearCookie("g_oauth_state")` called regardless of success/failure |
+| 7 | callback: happy path | Valid code + matching state | `exchangeCodeForProfile`/`findOrCreateGoogleUser`/`issueToken` called in order; `token` session cookie set; redirects with `oauth=success` |
+| 8 | callback: code exchange fails | `exchangeCodeForProfile` rejects | Redirects with `oauth=error`; `findOrCreateGoogleUser` never called (no account touched) |
+
 ---
 
 ## Frontend tests
@@ -164,11 +210,25 @@ Verifies `client/src/api/ai.js` and `client/src/api/aiPreferences.js` hit the ex
 | 5 | `getAiPreferences` | Request shape | `GET /api/ai/preferences` |
 | 6 | `updateAiPreferences` | Request shape | `PATCH /api/ai/preferences` with only the changed fields |
 
+### Login — Google OAuth (`LoginGoogleOAuth.test.jsx`) — 6 cases
+
+Covers the Google-specific pieces of `Login.jsx`: the button itself and the effect that reacts to the `?oauth=success|error` query string the server redirects back to. `api/client.js` and `AuthContext` are both mocked so no real server/session is needed; `MemoryRouter` + nested `Routes` let the test observe which page the app actually lands on after the redirect.
+
+| # | Test | What it checks | Expected outcome |
+|---|---|---|---|
+| 1 | Google button | Rendered on `/login` with no query string | A link named "Continue with Google" with `href="/api/auth/oauth/google"` |
+| 2 | success → active account | `?oauth=success`, `GET /auth/me` resolves with `isActive: true` | `login(user)` called; app navigates to the screener (`/`) |
+| 3 | success → inactive account | Same, but `isActive: false` | Navigates to `/activate` instead |
+| 4 | success but `/auth/me` fails | `GET /auth/me` rejects | Inline "Google sign-in failed…" shown; `login()` never called |
+| 5 | server-side error | `?oauth=error&message=Google+sign-in+was+cancelled` | That exact message shown inline; `GET /auth/me` never called |
+| 6 | already logged in | `user` already set (from `useAuth`) | Renders the account panel, not the form/button |
+
 ---
 
 ## Notes
 
-- **No real AI provider, database, or network call is used anywhere in this suite.** Backend tests mock `server/src/config/db.js`'s `pool` and the global `fetch`; frontend tests mock the `api/ai.js` / `api/aiPreferences.js` client modules (or `fetch` directly for the client tests). This keeps the suite fast and deterministic, and safe to run without an `.env` or a live MySQL instance.
+- **No real AI provider, database, network call, or Google OAuth credentials are used anywhere in this suite.** Backend tests mock `server/src/config/db.js`'s `pool` and the global `fetch`; frontend tests mock the `api/ai.js` / `api/aiPreferences.js` / `api/client.js` and `AuthContext` modules (or `fetch` directly for the client tests). This keeps the suite fast and deterministic, and safe to run without an `.env` or a live MySQL instance.
 - **`ai.controller.test.js`'s `aiHistory.service.js` mock is a *partial* mock** (`vi.mock(..., async (importOriginal) => ({ ...await importOriginal(), saveAiAnalysis: vi.fn(), ... }))`) so the controller's real `instanceof AiAnalysisNotFoundError` check keeps working against the actual error class, while every exported function is still stubbable per test.
 - **Async assertions in `AiHistory.test.jsx` use `waitFor`** around the mocked API-call expectation before querying the resulting UI text, rather than asserting immediately after `fireEvent.click`. The component's save/delete handlers are `async` functions that resolve after the click handler returns, so an immediate `expect` can race the state update; `waitFor`/`findBy*` poll until the DOM settles.
+- **`LoginGoogleOAuth.test.jsx` renders `Login` inside a `MemoryRouter` with sibling `/`/`/activate` routes** (rather than just `Login` alone) specifically so the post-redirect `navigate()` calls are observable as "which page rendered", not just "was `navigate` called with the right string" - closer to what a user actually sees.
 - Interactions use `fireEvent` (not `@testing-library/user-event`, which isn't a project dependency) to match the existing convention in `client/tests/enrico_javier_wijaya_250504Z/`.
