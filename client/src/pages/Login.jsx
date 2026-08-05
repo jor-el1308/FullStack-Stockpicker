@@ -15,9 +15,19 @@
  * (POST /auth/verify-otp) is what actually calls onAuthenticated(). Signup
  * is unchanged except for an added "Confirm Password" field, checked
  * client-side before submitting.
+ *
+ * "Sign in with Google" (Person 1): the button below is a plain link to
+ * GET /api/auth/oauth/google (server/src/controllers/auth.controller.js) -
+ * a full-page navigation, not a fetch call, since the OAuth flow needs the
+ * browser to actually visit Google's consent screen. Google redirects back
+ * to this same page with an `oauth=success` or `oauth=error` query string
+ * (see googleOAuthCallback()), which the effect in Login() below picks up:
+ * on success it fetches the now-logged-in user via GET /auth/me (the
+ * session cookie was already set server-side) and finishes login the same
+ * way password login does; on error it just surfaces the message.
  */
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
@@ -34,19 +44,69 @@ const CRITERIA_OPTIONS = [
 
 export default function Login() {
   const { user, login, logout } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [oauthError, setOauthError] = useState("");
+  // Only true while we still need to fetch the freshly-logged-in user after
+  // a successful Google redirect - avoids flashing the empty login form for
+  // the split second before that GET /auth/me resolves.
+  const [checkingOAuth, setCheckingOAuth] = useState(searchParams.get("oauth") === "success");
+
+  useEffect(() => {
+    const oauth = searchParams.get("oauth");
+    if (oauth === "success") {
+      api
+        .get("/auth/me")
+        .then((freshUser) => {
+          login(freshUser);
+          navigate(freshUser.isActive ? "/" : "/activate", { replace: true });
+        })
+        .catch(() => {
+          setOauthError("Google sign-in failed - please try again.");
+          setCheckingOAuth(false);
+          navigate("/login", { replace: true });
+        });
+    } else if (oauth === "error") {
+      setOauthError(searchParams.get("message") || "Google sign-in failed - please try again.");
+      navigate("/login", { replace: true });
+    }
+    // Only ever meant to run once, against whatever query string this page
+    // first loaded with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (checkingOAuth) {
+    return (
+      <div className="auth-dark-page">
+        <div className="auth-dark-hero" />
+        <aside className="auth-dark-sidebar">
+          <div className="auth-dark-content">
+            <p className="auth-dark-subtitle">Signing you in with Google...</p>
+          </div>
+        </aside>
+      </div>
+    );
+  }
 
   if (user) {
     return <AccountPanel user={user} onLogout={logout} />;
   }
-  return <AuthForm onAuthenticated={login} />;
+  return <AuthForm onAuthenticated={login} oauthError={oauthError} />;
 }
 
-function AuthForm({ onAuthenticated }) {
+function AuthForm({ onAuthenticated, oauthError }) {
   const navigate = useNavigate();
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ email: "", password: "", confirmPassword: "", name: "" });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Surfaces an error handed down from a failed Google redirect (see
+  // Login() above). A plain assignment rather than useState's initializer
+  // since oauthError can arrive after this component has already mounted.
+  useEffect(() => {
+    if (oauthError) setError(oauthError);
+  }, [oauthError]);
 
   // Login 2FA (Person 2): "credentials" is the normal email+password step;
   // "otp" is the second step after a correct password gets a code emailed.
@@ -212,6 +272,19 @@ function AuthForm({ onAuthenticated }) {
                   {submitting ? "Please wait..." : mode === "login" ? "Log In" : "Sign Up"}
                 </button>
               </form>
+
+              <div className="auth-dark-divider">
+                <span>or</span>
+              </div>
+              {/* Full-page link (not a fetch/onClick) to GET /api/auth/oauth/google -
+                  the browser needs to actually navigate to Google's consent screen.
+                  Works for both login and signup: a first-time Google sign-in
+                  creates the account automatically (see findOrCreateGoogleUser()). */}
+              <a href="/api/auth/oauth/google" className="auth-google-button">
+                <GoogleLogo />
+                Continue with Google
+              </a>
+
               <p className="auth-dark-footer">
                 {mode === "login" ? "Need an account? " : "Already have an account? "}
                 <button
@@ -271,6 +344,31 @@ function AuthForm({ onAuthenticated }) {
         </div>
       </aside>
     </div>
+  );
+}
+
+// Google's official four-color "G" mark, per Google's branding guidelines
+// for third-party "Sign in with Google" buttons.
+function GoogleLogo() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M17.64 9.2045c0-.6381-.0573-1.2518-.1636-1.8409H9v3.4814h4.8436c-.2086 1.125-.8427 2.0782-1.7959 2.7164v2.2581h2.9087c1.7018-1.5668 2.6836-3.8741 2.6836-6.615z"
+      />
+      <path
+        fill="#34A853"
+        d="M9 18c2.43 0 4.4673-.8059 5.9564-2.1805l-2.9087-2.2581c-.8059.54-1.8368.8591-3.0477.8591-2.3436 0-4.3282-1.5831-5.0359-3.7104H.9573v2.3318C2.4382 15.9832 5.4818 18 9 18z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M3.9641 10.71c-.18-.54-.2827-1.1168-.2827-1.71s.1027-1.17.2827-1.71V4.9582H.9573C.3477 6.1732 0 7.5477 0 9s.3477 2.8268.9573 4.0418L3.9641 10.71z"
+      />
+      <path
+        fill="#EA4335"
+        d="M9 3.5795c1.3214 0 2.5077.4541 3.4405 1.3459l2.5813-2.5814C13.4632.8918 11.4259 0 9 0 5.4818 0 2.4382 2.0168.9573 4.9582L3.9641 7.29C4.6718 5.1627 6.6564 3.5795 9 3.5795z"
+      />
+    </svg>
   );
 }
 

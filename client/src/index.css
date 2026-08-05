@@ -381,6 +381,59 @@ a, button {
   cursor: not-allowed;
 }
 
+/* "or" separator between the credentials form and the Google button below it */
+.auth-dark-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted-text-dark);
+}
+
+.auth-dark-divider::before,
+.auth-dark-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border-dark);
+}
+
+/* "Sign in with Google" button - kept white/light regardless of theme, per
+   Google's branding guidelines for third-party sign-in buttons, so it reads
+   distinctly from the app's own (blue) primary action button above it. */
+.auth-google-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 14px;
+  background: #ffffff;
+  color: #1f1f1f;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  font-family: var(--font-title);
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.auth-google-button:hover {
+  background: #f5f5f5;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.auth-google-button svg {
+  flex-shrink: 0;
+}
+
 .auth-dark-footer {
   margin: 24px 0 0;
   font-family: var(--font-body);
