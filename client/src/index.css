@@ -494,6 +494,20 @@ a, button {
   padding: 18px 20px;
 }
 
+/* While the AI panel is generating, pin it to the bottom of the viewport so
+   the user can watch it work without scrolling down first. It reverts to
+   its normal in-flow position (see Screener.jsx) once a result arrives. */
+.ai-analysis-floating {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  max-width: 760px;
+  margin: 0 auto;
+  box-shadow: 0 12px 32px rgba(10, 22, 40, 0.24);
+  z-index: 100;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
