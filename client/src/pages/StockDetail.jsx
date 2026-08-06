@@ -6,7 +6,7 @@
  */
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, TrendingUp, TrendingDown } from "lucide-react";
+import { ArrowLeft, TrendingUp, TrendingDown, Star } from "lucide-react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -18,6 +18,9 @@ import {
 } from "recharts";
 import { colors, fonts, fontWeights } from "../theme";
 import { getStockDetail, getStockPrices } from "../api/stocks";
+import { listStarred, addStar, removeStar } from "../api/personal";
+import StockNotes from "../components/StockNotes";
+import PriceTargetCard from "../components/PriceTargetCard";
 
 const NEUTRAL = {
   white: "var(--color-surface)",
@@ -53,6 +56,7 @@ export default function StockDetail() {
   const [prices, setPrices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [starred, setStarred] = useState(false);
   const requestSeq = useRef(0);
 
   // Screener ("/") and Dashboard ("/dashboard") both link here, so "back"
@@ -103,6 +107,32 @@ export default function StockDetail() {
       });
   }, [exchangeCode, stockCode]);
 
+  // Is this stock currently starred? (drives the star toggle in the header)
+  useEffect(() => {
+    let cancelled = false;
+    listStarred()
+      .then((list) => {
+        if (!cancelled) {
+          setStarred((list ?? []).some((s) => s.exchangeCode === exchangeCode && s.stockCode === stockCode));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [exchangeCode, stockCode]);
+
+  async function toggleStar() {
+    const next = !starred;
+    setStarred(next); // optimistic
+    try {
+      if (next) await addStar(exchangeCode, stockCode);
+      else await removeStar(exchangeCode, stockCode);
+    } catch {
+      setStarred(!next); // roll back on failure
+    }
+  }
+
   if (loading) {
     return <div style={{ fontFamily: fonts.description, color: NEUTRAL.textMuted, padding: 28 }}>Loading stock…</div>;
   }
@@ -129,6 +159,22 @@ export default function StockDetail() {
   const dayChange = hasPrices ? latest.close - prev.close : null;
   const dayChangePct = hasPrices ? (dayChange / prev.close) * 100 : null;
   const isUp = dayChange !== null ? dayChange >= 0 : true;
+
+  // 52-week high/low: prefer the value from the backend if it ever provides
+  // one, otherwise derive it from the price history we already fetched for the
+  // chart. Uses the last 365 days (falls back to all available prices), and
+  // each day's intraday high/low when present, else the close.
+  const yearAgo = Date.now() - 365 * 24 * 60 * 60 * 1000;
+  const window52w = prices.filter((p) => new Date(p.date).getTime() >= yearAgo);
+  const priceWindow = window52w.length > 0 ? window52w : prices;
+  const computedHigh = priceWindow.length
+    ? Math.max(...priceWindow.map((p) => p.high ?? p.close))
+    : null;
+  const computedLow = priceWindow.length
+    ? Math.min(...priceWindow.map((p) => p.low ?? p.close))
+    : null;
+  const fiftyTwoWeekHigh = detail.fiftyTwoWeekHigh ?? computedHigh;
+  const fiftyTwoWeekLow = detail.fiftyTwoWeekLow ?? computedLow;
 
   // Financials come as one row per fiscal year - use the two most recent for YoY revenue growth.
   const financials = [...(detail.financials ?? [])].sort((a, b) => a.year - b.year);
@@ -166,8 +212,18 @@ export default function StockDetail() {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16, marginBottom: 20 }}>
         <div>
-          <div style={{ fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel, fontSize: 22, color: colors.darkMenu }}>
-            {detail.stockName}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel, fontSize: 22, color: colors.darkMenu }}>
+              {detail.stockName}
+            </div>
+            <button
+              onClick={toggleStar}
+              aria-label={starred ? "Unstar this stock" : "Star this stock"}
+              title={starred ? "Unstar" : "Star this stock"}
+              style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 2, color: colors.special }}
+            >
+              <Star size={20} fill={starred ? colors.special : "none"} />
+            </button>
           </div>
           <div style={{ fontFamily: fonts.numeric, fontWeight: fontWeights.numeric, fontSize: 13, color: NEUTRAL.textMuted, marginTop: 4 }}>
             {detail.exchangeCode}:{detail.stockCode}
@@ -230,13 +286,13 @@ export default function StockDetail() {
         <div style={statCard}>
           <div style={statLabel}>52W High</div>
           <div style={{ ...statValue, color: colors.goodNumber }}>
-            {detail.fiftyTwoWeekHigh != null ? fmt(detail.fiftyTwoWeekHigh) : "—"}
+            {fiftyTwoWeekHigh != null ? fmt(fiftyTwoWeekHigh) : "—"}
           </div>
         </div>
         <div style={statCard}>
           <div style={statLabel}>52W Low</div>
           <div style={{ ...statValue, color: colors.badNumber }}>
-            {detail.fiftyTwoWeekLow != null ? fmt(detail.fiftyTwoWeekLow) : "—"}
+            {fiftyTwoWeekLow != null ? fmt(fiftyTwoWeekLow) : "—"}
           </div>
         </div>
         <div style={statCard}>
@@ -263,7 +319,14 @@ export default function StockDetail() {
             {latestDividend ? `${fmt(latestDividend.dividendCents / 100)}` : "—"}
           </div>
         </div>
+        <PriceTargetCard
+          exchangeCode={detail.exchangeCode}
+          stockCode={detail.stockCode}
+          currentPrice={hasPrices ? latest.close : null}
+        />
       </div>
+
+      <StockNotes exchangeCode={detail.exchangeCode} stockCode={detail.stockCode} />
     </div>
   );
 }

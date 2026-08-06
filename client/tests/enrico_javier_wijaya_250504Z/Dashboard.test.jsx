@@ -8,6 +8,14 @@ import { getStocks } from "../../src/api/stocks";
 // no real network call happens.
 vi.mock("../../src/api/stocks", () => ({ getStocks: vi.fn() }));
 
+// StarredStocks (rendered by Dashboard) reads from api/personal; stub it so
+// the dashboard tests stay focused on the screener results.
+vi.mock("../../src/api/personal", () => ({
+  listStarred: vi.fn().mockResolvedValue([]),
+  addStar: vi.fn(),
+  removeStar: vi.fn(),
+}));
+
 function renderDashboard() {
   // Dashboard uses useNavigate(), so it must be inside a Router.
   return render(

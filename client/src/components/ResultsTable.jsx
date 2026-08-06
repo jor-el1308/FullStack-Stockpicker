@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Star } from "lucide-react";
 import { colors, fonts } from "../theme";
 import { labelFor, formatValue } from "../screener/criteria";
 
@@ -30,6 +31,8 @@ export default function ResultsTable({
   selectable = false,
   selectedKeys,
   onToggleRow,
+  starredKeys,
+  onToggleStar,
 }) {
   const [page, setPage] = useState(1);
 
@@ -64,6 +67,7 @@ export default function ResultsTable({
         <thead>
           <tr>
             {selectable && <th style={{ width: 32 }} />}
+            {onToggleStar && <th style={{ width: 36 }} />}
             <th>Exchange</th>
             <th>Stock Code</th>
             <th>Stock Name</th>
@@ -107,8 +111,21 @@ export default function ResultsTable({
                     />
                   </td>
                 )}
+                {onToggleStar && (
+                  <td onClick={(e) => e.stopPropagation()} style={{ textAlign: "center" }}>
+                    <button
+                      type="button"
+                      onClick={() => onToggleStar(row)}
+                      aria-label={starredKeys?.has(rowKey) ? `Unstar ${row.stockName}` : `Star ${row.stockName}`}
+                      title={starredKeys?.has(rowKey) ? "Unstar" : "Star"}
+                      style={{ background: "none", border: "none", cursor: "pointer", display: "inline-flex", padding: 2, color: colors.special }}
+                    >
+                      <Star size={16} fill={starredKeys?.has(rowKey) ? colors.special : "none"} />
+                    </button>
+                  </td>
+                )}
                 <td>{row.exchangeCode}</td>
-                <td className="numeric">{row.stockCode}</td>
+                <td style={{ fontFamily: fonts.numeric }}>{row.stockCode}</td>
                 <td>{row.stockName}</td>
                 {criteriaKeys.map((key) => {
                   const value = row.values[key];

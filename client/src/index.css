@@ -606,6 +606,7 @@ a, button {
 .results-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .results-table th {
