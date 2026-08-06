@@ -742,6 +742,62 @@ a, button {
   white-space: nowrap;
 }
 
+.saved-screen-chip-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.saved-screen-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  min-width: 200px;
+  max-width: 260px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid rgba(10, 22, 40, 0.12);
+  box-shadow: 0 14px 32px rgba(10, 22, 40, 0.12);
+  font-size: 12.75px;
+  line-height: 1.5;
+  color: #0a1628;
+  font-weight: 500;
+}
+
+.saved-screen-tooltip::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 18px;
+  border-width: 0 8px 8px 8px;
+  border-style: solid;
+  border-color: transparent transparent #ffffff transparent;
+}
+
+.saved-screen-tooltip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.saved-screen-tooltip-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(10, 22, 40, 0.05);
+}
+
+.saved-screen-tooltip-line:last-child {
+  border-bottom: none;
+}
+
+.saved-screen-tooltip-key {
+  color: #1a5c9e;
+  font-weight: 700;
+}
+
 .ai-comparison-table td {
   padding: 10px 12px;
   border-bottom: 1px solid var(--color-border);

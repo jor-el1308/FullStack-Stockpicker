@@ -3,6 +3,7 @@ import { Bell, Plus, Trash2, CheckCircle2, XCircle, AlertTriangle } from "lucide
 import { useAuth } from "../context/AuthContext";
 import { addToWatchlist, listWatchlist, removeFromWatchlist, listSavedScreens, runScreener } from "../api/stocks";
 import { determineWatchlistStatus } from "../utils/watchlistStatus";
+import { EXCHANGES } from "../screener/criteria";
 
 const CHANNEL_OPTIONS = [
   { value: "whatsapp", label: "WhatsApp" },
@@ -26,6 +27,37 @@ export default function Watchlist() {
   });
   const [statusById, setStatusById] = useState({});
   const [statusLoading, setStatusLoading] = useState(false);
+  const [hoveredScreenId, setHoveredScreenId] = useState(null);
+
+  const statusMeta = useMemo(
+    () => ({
+      pass: {
+        label: "Pass",
+        chip: "chip chip-good",
+        icon: <CheckCircle2 size={14} />,
+        hint: "Still matches your saved criteria.",
+      },
+      fail: {
+        label: "Fail",
+        chip: "chip chip-special",
+        icon: <XCircle size={14} />,
+        hint: "No longer meets your saved criteria — your alert channel is ready for the drop-out event.",
+      },
+      needsCriteria: {
+        label: "Needs criteria",
+        chip: "chip",
+        icon: <AlertTriangle size={14} />,
+        hint: "Attach a saved screen to evaluate this stock.",
+      },
+      unknown: {
+        label: "Checking",
+        chip: "chip",
+        icon: <Bell size={14} />,
+        hint: "Status is being checked against the latest screener results.",
+      },
+    }),
+    []
+  );
 
   async function refreshWatchlist() {
     if (!user) {
@@ -123,7 +155,7 @@ export default function Watchlist() {
       setForm({ exchangeCode: "", stockCode: "", savedCriteriaSetId: "", channel: form.channel, recipientNumber: "" });
       await refreshWatchlist();
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "Unable to add stock to watchlist.");
     } finally {
       setSubmitting(false);
     }
@@ -180,11 +212,17 @@ export default function Watchlist() {
         <form onSubmit={handleAdd} className="watchlist-form-grid">
           <label className="watchlist-field">
             <span>Exchange</span>
-            <input
+            <select
               value={form.exchangeCode}
               onChange={(e) => setForm((current) => ({ ...current, exchangeCode: e.target.value }))}
-              placeholder="NYSE"
-            />
+            >
+              <option value="">Select exchange</option>
+              {EXCHANGES.map((exchange) => (
+                <option key={exchange} value={exchange}>
+                  {exchange}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="watchlist-field">
             <span>Stock code</span>
@@ -290,19 +328,62 @@ export default function Watchlist() {
                       {item.exchange_code}:{item.stock_code}
                     </div>
                   </div>
-                  <span className={statusMeta.chip}>
-                    {statusMeta.icon}
-                    {statusMeta.label}
+                  <span className={statusMeta?.chip ?? "chip"}>
+                    {statusMeta?.icon ?? <Bell size={14} />}
+                    {statusMeta?.label ?? "Checking"}
                   </span>
                 </div>
 
-                <div className="watchlist-meta-row">
+                <div className="watchlist-meta-row" style={{ position: "relative" }}>
                   <span className="chip chip-accent">{CHANNEL_OPTIONS.find((option) => option.value === item.channel)?.label ?? item.channel}</span>
-                  {selectedScreen ? <span className="chip">{selectedScreen.name}</span> : <span className="chip">No saved screen</span>}
+                  {selectedScreen ? (
+                    <div
+                      className="saved-screen-chip-wrapper"
+                      onMouseEnter={() => setHoveredScreenId(item.id)}
+                      onMouseLeave={() => setHoveredScreenId(null)}
+                    >
+                      <span className="chip" style={{ cursor: "help" }}>
+                        {selectedScreen.name}
+                      </span>
+                      {hoveredScreenId === item.id ? (
+                        <div
+                          className="saved-screen-tooltip"
+                          onMouseEnter={() => setHoveredScreenId(item.id)}
+                          onMouseLeave={() => setHoveredScreenId(null)}
+                        >
+                          {selectedScreen.criteria?.length ? (
+                            <div className="saved-screen-tooltip-body">
+                              {selectedScreen.criteria.map((criterion) => {
+                                const formatValue = (value) =>
+                                  typeof value === "number" ? value.toFixed(1) : value;
+                                const parts = [];
+                                if (criterion.min != null) parts.push(`>= ${formatValue(criterion.min)}`);
+                                if (criterion.max != null) parts.push(`<= ${formatValue(criterion.max)}`);
+                                const rangeText = parts.join(" and ");
+                                return (
+                                  <div
+                                    key={`${criterion.key}-${criterion.min ?? "-"}-${criterion.max ?? "-"}`}
+                                    className="saved-screen-tooltip-line"
+                                  >
+                                    <span className="saved-screen-tooltip-key">{criterion.key}</span>
+                                    <span>{rangeText || "set"}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="saved-screen-tooltip-body">No filter details available</div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <span className="chip">No saved screen</span>
+                  )}
                 </div>
 
                 <p className="page-subtitle" style={{ marginTop: 10 }}>
-                  {statusMeta.hint}
+                  {statusMeta?.hint ?? "Status is being checked against the latest screener results."}
                 </p>
 
                 {statusLoading ? (
