@@ -176,6 +176,103 @@ export async function createUser({ email, password, name }) {
 }
 
 /**
+ * @param {string} googleId
+ */
+export async function findUserByGoogleId(googleId) {
+  const [rows] = await pool.query(
+    `SELECT id, email, name, avatar, created_at AS createdAt, is_active AS isActive,
+            activated_at AS activatedAt, is_admin AS isAdmin
+     FROM users WHERE google_id = ? LIMIT 1`,
+    [googleId]
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Finds or creates a user for "Sign in with Google" (see auth.controller.js's
+ * googleOAuthCallback()). Tries, in order:
+ *   1. An account already linked to this Google id (repeat sign-in).
+ *   2. An existing password account with the same email - linked onto in
+ *      place rather than creating a duplicate account, which is safe
+ *      because Google has already verified the caller controls that email
+ *      (see googleOAuthCallback()'s use of `email_verified`).
+ *   3. Otherwise, a brand-new account with no password
+ *      (password_hash NULL - see migration 014) since Google is the only
+ *      way in for it.
+ * @param {{ googleId: string, email: string, name: string, avatar?: string | null }} profile
+ */
+export async function findOrCreateGoogleUser({ googleId, email, name, avatar }) {
+  const byGoogleId = await findUserByGoogleId(googleId);
+  if (byGoogleId) return byGoogleId;
+
+  const existing = await findUserByEmail(email);
+  if (existing) {
+    await pool.query(`UPDATE users SET google_id = ? WHERE id = ?`, [googleId, existing.id]);
+    return findUserById(existing.id);
+  }
+
+  const id = randomUUID();
+  // is_active/is_admin default to 0 at the DB level, same as createUser() -
+  // a Google-created account still has to subscribe like any other.
+  await pool.query(`INSERT INTO users (id, email, google_id, name, avatar) VALUES (?, ?, ?, ?, ?)`, [
+    id,
+    email,
+    googleId,
+    name,
+    avatar ?? null,
+  ]);
+  return findUserById(id);
+}
+
+/**
+ * @param {string} microsoftId
+ */
+export async function findUserByMicrosoftId(microsoftId) {
+  const [rows] = await pool.query(
+    `SELECT id, email, name, avatar, created_at AS createdAt, is_active AS isActive,
+            activated_at AS activatedAt, is_admin AS isAdmin
+     FROM users WHERE microsoft_id = ? LIMIT 1`,
+    [microsoftId]
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Finds or creates a user for "Sign in with Microsoft" (see
+ * auth.controller.js's microsoftOAuthCallback()). Same three-step lookup as
+ * findOrCreateGoogleUser() above:
+ *   1. An account already linked to this Microsoft id (repeat sign-in).
+ *   2. An existing account (password and/or Google-linked) with the same
+ *      email - linked onto in place rather than creating a duplicate.
+ *   3. Otherwise, a brand-new account with no password (password_hash NULL,
+ *      same as a Google-created account) since Microsoft is the only way in
+ *      for it.
+ * @param {{ microsoftId: string, email: string, name: string, avatar?: string | null }} profile
+ */
+export async function findOrCreateMicrosoftUser({ microsoftId, email, name, avatar }) {
+  const byMicrosoftId = await findUserByMicrosoftId(microsoftId);
+  if (byMicrosoftId) return byMicrosoftId;
+
+  const existing = await findUserByEmail(email);
+  if (existing) {
+    await pool.query(`UPDATE users SET microsoft_id = ? WHERE id = ?`, [microsoftId, existing.id]);
+    return findUserById(existing.id);
+  }
+
+  const id = randomUUID();
+  // is_active/is_admin default to 0 at the DB level, same as createUser() -
+  // a Microsoft-created account still has to subscribe like any other.
+  await pool.query(`INSERT INTO users (id, email, microsoft_id, name, avatar) VALUES (?, ?, ?, ?, ?)`, [
+    id,
+    email,
+    microsoftId,
+    name,
+    avatar ?? null,
+  ]);
+  return findUserById(id);
+}
+
+/**
  * Fetches just the id + password hash for a user, for re-authenticating a
  * sensitive action (account deletion). Kept separate from findUserById(),
  * which deliberately never selects password_hash.

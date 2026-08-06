@@ -302,7 +302,10 @@ export default function Screener() {
       </div>
 
       {(analyzing || analysis || analyzeError) && (
-        <div className="card card-pad" style={{ marginTop: 16 }}>
+        <div
+          className={`card card-pad${analyzing ? " ai-analysis-floating" : ""}`}
+          style={analyzing ? undefined : { marginTop: 16 }}
+        >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
             <span
               style={{

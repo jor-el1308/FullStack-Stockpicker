@@ -1,5 +1,7 @@
 import { z } from "zod";
 import * as authService from "../services/auth.service.js";
+import * as googleOAuthService from "../services/googleOAuth.service.js";
+import * as microsoftOAuthService from "../services/microsoftOAuth.service.js";
 import { sendOtpEmail, sendEmailChangeOtpEmail } from "../utils/mailer.js";
 import { parseDurationMs } from "../config/jwt.js";
 import { sendInternalError } from "../utils/errors.js";
@@ -243,6 +245,151 @@ export async function verifyLoginOtp(req, res) {
 export function logout(_req, res) {
   res.clearCookie(SESSION_COOKIE);
   res.json({ success: true, data: { loggedOut: true } });
+}
+
+// Short-lived cookies holding the CSRF `state` value for each provider's
+// OAuth round trip - see googleOAuthService/microsoftOAuthService's
+// generateOAuthState(). Separate cookies (rather than one shared name) so a
+// Google flow started in one tab can't be completed against a Microsoft
+// callback URL or vice versa.
+const OAUTH_STATE_COOKIE = "g_oauth_state";
+const MS_OAUTH_STATE_COOKIE = "ms_oauth_state";
+
+function getOAuthClientBaseUrl() {
+  return process.env.OAUTH_SUCCESS_REDIRECT?.trim() || "http://localhost:5173/";
+}
+
+/**
+ * Sends the browser back to the login page with a query string the client
+ * (client/src/pages/Login.jsx) reads on mount: `oauth=success` to pull the
+ * now-logged-in user via GET /auth/me, or `oauth=error&message=...` to show
+ * why sign-in didn't complete.
+ */
+function redirectToLogin(res, params) {
+  const url = new URL("/login", getOAuthClientBaseUrl());
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) url.searchParams.set(key, value);
+  }
+  res.redirect(url.toString());
+}
+
+/**
+ * Step 1 of "Sign in with Google" (client/src/pages/Login.jsx's Google
+ * button is a plain link to this route, GET /api/auth/oauth/google - no
+ * Google JS SDK involved). Stashes a random CSRF `state` value in a
+ * short-lived cookie and sends the browser to Google's consent screen with
+ * that same value, so the callback below can confirm the response actually
+ * belongs to a flow this server started.
+ */
+export function googleOAuthStart(_req, res) {
+  try {
+    const state = googleOAuthService.generateOAuthState();
+    res.cookie(OAUTH_STATE_COOKIE, state, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 5 * 60 * 1000,
+    });
+    res.redirect(googleOAuthService.buildGoogleAuthUrl(state));
+  } catch (err) {
+    console.error("[auth] googleOAuthStart failed:", err.message);
+    redirectToLogin(res, { oauth: "error", message: "Google sign-in is not available right now" });
+  }
+}
+
+/**
+ * Step 2: Google redirects the browser back here with either an
+ * authorization `code` (consent granted) or an `error` (denied/cancelled).
+ * A valid code is exchanged for the user's Google profile, which either
+ * creates a brand-new account or links onto/logs into an existing one by
+ * email (see authService.findOrCreateGoogleUser()) - then a normal session
+ * cookie is issued, same as the end of password login.
+ *
+ * NOTE for Person 1/2 (please review): unlike password login, this does
+ * NOT go through the email-OTP second factor (verifyLoginOtp() above) -
+ * Google has already authenticated the user (and enforces its own 2FA if
+ * the user has that turned on for their Google account), so re-prompting
+ * for a code emailed to the same address would be redundant friction, not
+ * extra security.
+ */
+export async function googleOAuthCallback(req, res) {
+  const { code, state, error: googleError } = req.query;
+  const expectedState = req.cookies?.[OAUTH_STATE_COOKIE];
+  res.clearCookie(OAUTH_STATE_COOKIE);
+
+  if (googleError) {
+    return redirectToLogin(res, { oauth: "error", message: "Google sign-in was cancelled" });
+  }
+  if (!code || !state || !expectedState || state !== expectedState) {
+    return redirectToLogin(res, {
+      oauth: "error",
+      message: "Google sign-in session expired - please try again",
+    });
+  }
+
+  try {
+    const profile = await googleOAuthService.exchangeCodeForProfile(code);
+    const user = await authService.findOrCreateGoogleUser(profile);
+    const token = authService.issueToken(user);
+    setSessionCookie(res, token);
+    redirectToLogin(res, { oauth: "success" });
+  } catch (err) {
+    console.error("[auth] googleOAuthCallback failed:", err.message);
+    redirectToLogin(res, { oauth: "error", message: "Google sign-in failed - please try again" });
+  }
+}
+
+/**
+ * Step 1 of "Sign in with Microsoft" - mirrors googleOAuthStart() exactly,
+ * against microsoftOAuthService instead.
+ */
+export function microsoftOAuthStart(_req, res) {
+  try {
+    const state = microsoftOAuthService.generateOAuthState();
+    res.cookie(MS_OAUTH_STATE_COOKIE, state, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 5 * 60 * 1000,
+    });
+    res.redirect(microsoftOAuthService.buildMicrosoftAuthUrl(state));
+  } catch (err) {
+    console.error("[auth] microsoftOAuthStart failed:", err.message);
+    redirectToLogin(res, { oauth: "error", message: "Microsoft sign-in is not available right now" });
+  }
+}
+
+/**
+ * Step 2: mirrors googleOAuthCallback() exactly, against
+ * microsoftOAuthService/authService.findOrCreateMicrosoftUser() instead. Same
+ * NOTE as googleOAuthCallback() applies here - Microsoft has already
+ * authenticated the user, so this also skips the email-OTP second factor.
+ */
+export async function microsoftOAuthCallback(req, res) {
+  const { code, state, error: msError } = req.query;
+  const expectedState = req.cookies?.[MS_OAUTH_STATE_COOKIE];
+  res.clearCookie(MS_OAUTH_STATE_COOKIE);
+
+  if (msError) {
+    return redirectToLogin(res, { oauth: "error", message: "Microsoft sign-in was cancelled" });
+  }
+  if (!code || !state || !expectedState || state !== expectedState) {
+    return redirectToLogin(res, {
+      oauth: "error",
+      message: "Microsoft sign-in session expired - please try again",
+    });
+  }
+
+  try {
+    const profile = await microsoftOAuthService.exchangeCodeForProfile(code);
+    const user = await authService.findOrCreateMicrosoftUser(profile);
+    const token = authService.issueToken(user);
+    setSessionCookie(res, token);
+    redirectToLogin(res, { oauth: "success" });
+  } catch (err) {
+    console.error("[auth] microsoftOAuthCallback failed:", err.message);
+    redirectToLogin(res, { oauth: "error", message: "Microsoft sign-in failed - please try again" });
+  }
 }
 
 /**

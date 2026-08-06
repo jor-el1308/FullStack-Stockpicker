@@ -16,6 +16,18 @@ router.post("/login", loginLimiter, authController.login);
 router.post("/verify-otp", otpLimiter, authController.verifyLoginOtp);
 router.post("/resend-otp", otpLimiter, authController.resendLoginOtp);
 router.post("/logout", authController.logout);
+// "Sign in with Google" (OAuth 2.0 authorization code flow) - the client's
+// Google button just links to the first route below; Google redirects the
+// browser to the second one once the user grants/denies consent. Both are
+// full-page navigations, not JSON APIs, so they redirect rather than
+// respond with { success, data }. loginLimiter caps abuse the same as the
+// password login route. See auth.controller.js / googleOAuth.service.js.
+router.get("/oauth/google", loginLimiter, authController.googleOAuthStart);
+router.get("/oauth/google/callback", loginLimiter, authController.googleOAuthCallback);
+// "Sign in with Microsoft" - same shape as the Google routes above. See
+// auth.controller.js / microsoftOAuth.service.js.
+router.get("/oauth/microsoft", loginLimiter, authController.microsoftOAuthStart);
+router.get("/oauth/microsoft/callback", loginLimiter, authController.microsoftOAuthCallback);
 router.get("/me", requireAuth, authController.getProfile);
 // Edit own profile - display name only ({ name }). Email changes go through
 // the verified two-step flow below. See auth.controller.js updateProfile().

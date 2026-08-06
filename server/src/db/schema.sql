@@ -105,8 +105,22 @@ CREATE TABLE IF NOT EXISTS financials (
 CREATE TABLE IF NOT EXISTS users (
   id            CHAR(36) PRIMARY KEY DEFAULT (UUID()),
   email         VARCHAR(255) NOT NULL UNIQUE,
-  password_hash VARCHAR(255) NOT NULL,
+  -- NULL for accounts created via "Sign in with Google" (see google_id
+  -- below) - they authenticate with Google, not a local password, so
+  -- there's nothing to hash. See migration 014.
+  password_hash VARCHAR(255) NULL,
   name          VARCHAR(128) NOT NULL,
+  -- Google account id ("sub" claim) for accounts that have linked Google
+  -- sign-in - NULL for password-only accounts. Set the first time a user
+  -- signs in with Google, whether that creates a brand-new account or links
+  -- onto an existing password account with the same (Google-verified)
+  -- email. See auth.service.js's findOrCreateGoogleUser() and migration 014.
+  google_id     VARCHAR(255) NULL UNIQUE,
+  -- Microsoft account id ("oid" claim, scoped to the tenant) for accounts
+  -- that have linked "Sign in with Microsoft" - NULL for accounts that
+  -- haven't. Same linking behavior as google_id above. See
+  -- auth.service.js's findOrCreateMicrosoftUser() and migration 015.
+  microsoft_id  VARCHAR(255) NULL UNIQUE,
   -- Profile picture (Person 1), stored inline as a resized/compressed data
   -- URL so there's no separate file store. NULL = no photo set, UI falls
   -- back to initials. Size is capped in the API + by the client resize; see
