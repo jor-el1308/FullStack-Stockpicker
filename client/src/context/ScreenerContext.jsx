@@ -55,15 +55,42 @@ export function ScreenerProvider({ children }) {
   }, [criteria, exchanges, excludeSectors, minCompanyAgeYears]);
 
   const buildRequest = useCallback(
-    (overrides = {}) => ({
-      criteria: (overrides.criteria ?? criteria ?? []).filter(
-        (c) => (c.min != null && c.min !== "") || (c.max != null && c.max !== "") || c.weight
-      ),
-      ...(exchanges.length ? { exchanges } : {}),
-      excludeSectors,
-      minCompanyAgeYears: Number(minCompanyAgeYears) || 0,
-      ...overrides,
-    }),
+    (overrides = {}) => {
+      // Coerce to a finite number or null. The server schema is strict
+      // z.number(), so a stray "" / NaN / stringified value (e.g. from stale
+      // localStorage or a number input) would otherwise 400 as an "Invalid
+      // screener request". Sanitize here so the payload is always clean.
+      const num = (v) => {
+        if (v == null || v === "") return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      };
+      const merged = {
+        criteria: criteria ?? [],
+        ...(exchanges.length ? { exchanges } : {}),
+        excludeSectors,
+        minCompanyAgeYears,
+        ...overrides,
+      };
+      return {
+        ...merged,
+        criteria: (merged.criteria ?? [])
+          .map((c) => {
+            const min = num(c.min);
+            const max = num(c.max);
+            const weight = num(c.weight);
+            return {
+              key: c.key,
+              ...(c.label != null ? { label: c.label } : {}),
+              ...(min != null ? { min } : {}),
+              ...(max != null ? { max } : {}),
+              ...(weight ? { weight } : {}),
+            };
+          })
+          .filter((c) => c.min != null || c.max != null || c.weight != null),
+        minCompanyAgeYears: num(merged.minCompanyAgeYears) ?? 0,
+      };
+    },
     [criteria, exchanges, excludeSectors, minCompanyAgeYears]
   );
 
