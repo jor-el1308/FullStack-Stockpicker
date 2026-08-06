@@ -1,8 +1,8 @@
-# Use Cases — AI Stock Analysis & Google OAuth
+# Use Cases — AI Stock Analysis & Google/Microsoft OAuth
 
-**Owner:** Yong Wee (Person 1) · **Features:** "Analyze with AI" on the Screener (`server/src/{routes,controllers,services}/ai.*`), AI Analysis History (`client/src/pages/AiHistory.jsx`), AI Preferences (Settings → "AI preferences" tab), "Sign in with Google" (`server/src/{routes,controllers}/auth.*`, `server/src/services/googleOAuth.service.js`, `client/src/pages/Login.jsx`)
+**Owner:** Yong Wee (Person 1) · **Features:** "Analyze with AI" on the Screener (`server/src/{routes,controllers,services}/ai.*`), AI Analysis History (`client/src/pages/AiHistory.jsx`), AI Preferences (Settings → "AI preferences" tab), "Sign in with Google" / "Sign in with Microsoft" (`server/src/{routes,controllers}/auth.*`, `server/src/services/{googleOAuth,microsoftOAuth}.service.js`, `client/src/pages/Login.jsx`)
 
-Two sets of use cases. UC-01 through UC-07 cover the AI qualitative-analysis feature: after a user shortlists stocks from the screener results, the app sends them to an LLM for a qualitative take (recent context, growth outlook, reasoning), lets the user revisit/edit/delete past runs, and lets them tune how the model analyzes (model tier, persona, detail level, custom instructions). UC-08 through UC-10 cover "Sign in with Google": logging in or signing up with a Google account instead of email/password.
+Three sets of use cases. UC-01 through UC-07 cover the AI qualitative-analysis feature: after a user shortlists stocks from the screener results, the app sends them to an LLM for a qualitative take (recent context, growth outlook, reasoning), lets the user revisit/edit/delete past runs, and lets them tune how the model analyzes (model tier, persona, detail level, custom instructions). UC-08 through UC-10 cover "Sign in with Google": logging in or signing up with a Google account instead of email/password. UC-11 through UC-13 cover "Sign in with Microsoft" - the same idea against a Microsoft account, added as a second button next to Google's on the same login page.
 
 ## Actors
 
@@ -15,7 +15,7 @@ Every `/api/ai/*` route requires authentication (`requireAuth`) **and** an activ
 | **Subscriber** | Logged in, active | Full access — primary actor below |
 | **Admin** | Logged in, active, admin | Same access as Subscriber (no elevated AI privileges) |
 
-The Google OAuth routes (`/api/auth/oauth/google*`, UC-08–UC-10) are the odd one out: they're deliberately reachable by a **Visitor** with no auth at all — they're an entry point *into* being logged in, same as `POST /auth/login`/`POST /auth/signup`, not a feature gated behind login.
+The Google and Microsoft OAuth routes (`/api/auth/oauth/{google,microsoft}*`, UC-08–UC-13) are the odd ones out: they're deliberately reachable by a **Visitor** with no auth at all — they're an entry point *into* being logged in, same as `POST /auth/login`/`POST /auth/signup`, not a feature gated behind login.
 
 ---
 
@@ -156,6 +156,43 @@ The Google OAuth routes (`/api/auth/oauth/google*`, UC-08–UC-10) are the odd o
 - **Alternate / edge flows:**
   - *E1 — The email match happens between two different people (unlikely, since Google verifies the address):* out of scope — this app trusts Google's `email_verified` claim the same way `email-change/verify` trusts its own OTP as proof of address ownership.
 
+## UC-11 — Sign up / log in with a Microsoft account (first time)
+
+- **Actor:** Visitor (not logged in, and this is the first time they've ever used this Microsoft account with the app — neither `microsoft_id` nor their Microsoft account's email exists in `users`).
+- **Trigger:** User clicks the white "Continue with Microsoft" button, next to the Google one, under the login/signup form on `/login`.
+- **Preconditions:** None — same as UC-08, this button is shared by both the "login" and "signup" modes of the form, since a first-time Microsoft sign-in *is* the signup.
+- **Main flow:** Identical shape to UC-08, against the Microsoft identity platform instead of Google's:
+  1. The browser navigates (full page load, not a fetch) to `GET /api/auth/oauth/microsoft`, which stashes a CSRF `state` value in a short-lived cookie (`ms_oauth_state`) and redirects to Microsoft's consent screen.
+  2. The user picks a Microsoft account and grants access (`select_account` is forced, same reasoning as Google's).
+  3. Microsoft redirects back to `GET /api/auth/oauth/microsoft/callback` with an authorization `code`.
+  4. The server verifies the CSRF `state`, exchanges the code for the user's Microsoft Graph profile, finds no matching `microsoft_id` or email, and creates a brand-new account (`password_hash = NULL` — see migration 015) with `is_active = 0` like any other new signup.
+  5. A normal session cookie is issued (no email-OTP step — see UC-12's note) and the browser is redirected to `/login?oauth=success` - the exact same query string Google's flow uses, since both providers share one success/error contract on the client.
+  6. The client fetches `GET /api/auth/me`, logs the user in, and — since the new account isn't active yet — routes to `/activate`, same as a fresh password signup.
+- **Postcondition:** A new `users` row exists, linked to the Microsoft account; the user is logged in and on the paywall page.
+- **Alternate / edge flows:**
+  - *E1 — User cancels/denies consent on Microsoft's screen:* redirected to `/login?oauth=error&message=Microsoft+sign-in+was+cancelled`, shown inline; no account is created.
+  - *E2 — Microsoft account has no usable email (`mail` and `userPrincipalName` both absent):* rejected before any account is touched; generic "Microsoft sign-in failed" message (doesn't reveal *why*, same reasoning as UC-08's E2).
+
+## UC-12 — Log in with a Microsoft account (returning user)
+
+- **Actor:** Visitor whose Microsoft account is already linked (`microsoft_id` matches an existing row).
+- **Trigger:** Same "Continue with Microsoft" button.
+- **Main flow:** Same steps as UC-11, except step 4 finds the existing account by `microsoft_id` immediately and step 6 routes to `/` (screener) instead of `/activate` if the account is already active, or `/activate` if it isn't — identical branching to UC-09's returning-Google-user flow.
+- **Postcondition:** The existing user is logged in.
+- **Note (design decision, flagged for review):** Same as UC-09's note for Google - Microsoft sign-in does **not** go through the app's email-OTP second factor. Microsoft has already authenticated the user (and enforces its own 2FA/Conditional Access if configured on the account or tenant), so a second emailed code would be redundant friction rather than added security.
+
+## UC-13 — Microsoft sign-in on an email that already has an account
+
+- **Actor:** Visitor with an existing account (password-based, or already Google-linked) under the same email as the Microsoft account they sign in with.
+- **Trigger:** Same "Continue with Microsoft" button, using a Microsoft account whose email matches an existing `users.email`, but whose `microsoft_id` has never been seen before.
+- **Main flow:**
+  1. Steps 1–3 as UC-11.
+  2. The server finds no `microsoft_id` match, but finds an existing account by email. The accounts are treated as the same person: `microsoft_id` is written onto the existing row rather than creating a duplicate account.
+  3. From then on, that account can be logged into with **any** of: the original password (`POST /auth/login`, still going through email-OTP), a linked Google account (skipping OTP, per UC-09), or this Microsoft account (skipping OTP, per UC-12) — all reach the same `users` row.
+- **Postcondition:** One account, now reachable by every linked method; no duplicate account is created.
+- **Alternate / edge flows:**
+  - *E1 — The email match happens between two different people:* out of scope, same as UC-10's E1 - but see the Database Schema doc's note that this is a **weaker guarantee than Google's**, since Microsoft Graph's `/me` has no `email_verified`-equivalent flag; a `mail`/`userPrincipalName` match is trusted as proof of ownership without that extra signal.
+
 ---
 
 ## Edge-case coverage summary
@@ -177,7 +214,10 @@ The Google OAuth routes (`/api/auth/oauth/google*`, UC-08–UC-10) are the odd o
 | Unauthenticated | `requireAuth` + API `401` | Redirect to `/login` |
 | Inactive / unpaid account | `requireActiveAccount` + API `402` | Redirect to `/activate` |
 | User denies/cancels Google consent | `googleOAuthCallback` (`error` query param) | Redirect to `/login?oauth=error&message=...`; no account touched |
-| Forged/replayed/expired OAuth callback (`state` missing or mismatched) | `googleOAuthCallback` CSRF check | Redirect to `/login?oauth=error&message=...`; code exchange never attempted |
+| Forged/replayed/expired OAuth callback (`state` missing or mismatched) | `googleOAuthCallback`/`microsoftOAuthCallback` CSRF check | Redirect to `/login?oauth=error&message=...`; code exchange never attempted |
 | Google account has no verified email | `googleOAuth.service.js` `exchangeCodeForProfile` | Redirect to `/login?oauth=error&message=...`; no account touched |
 | Google email matches an existing password account | `auth.service.js` `findOrCreateGoogleUser` | `google_id` linked onto the existing row, not duplicated (see UC-10) |
-| `GET /auth/me` fails right after a successful OAuth redirect | `Login.jsx`'s `oauth=success` effect | Inline "Google sign-in failed" message; user not marked logged in client-side |
+| User denies/cancels Microsoft consent | `microsoftOAuthCallback` (`error` query param) | Redirect to `/login?oauth=error&message=...`; no account touched |
+| Microsoft account has no usable email (`mail`/`userPrincipalName` both absent) | `microsoftOAuth.service.js` `exchangeCodeForProfile` | Redirect to `/login?oauth=error&message=...`; no account touched |
+| Microsoft email matches an existing account (password and/or Google-linked) | `auth.service.js` `findOrCreateMicrosoftUser` | `microsoft_id` linked onto the existing row, not duplicated (see UC-13) |
+| `GET /auth/me` fails right after a successful OAuth redirect (either provider) | `Login.jsx`'s shared `oauth=success` effect | Generic inline "Sign-in failed" message; user not marked logged in client-side |

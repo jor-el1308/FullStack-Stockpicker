@@ -1,8 +1,8 @@
-# Database Schema — AI Stock Analysis & Google OAuth
+# Database Schema — AI Stock Analysis & Google/Microsoft OAuth
 
 **Owner:** Yong Wee (Person 1)
 
-Two features' worth of schema. The two tables that back the AI analysis feature are defined in `server/src/db/schema.sql` (and originally introduced by `server/src/db/migrations/011_add_ai_analysis_history.sql`, `012_add_ai_analysis_title.sql`, and `013_add_ai_preferences.sql`). "Sign in with Google" doesn't add a new table — it extends the shared `users` table (see `server/src/db/migrations/014_add_google_oauth.sql`). All three reference/live on `users(id)`, which is shared infrastructure — its `id`/`email`/`password_hash`/`google_id`/`name`/`avatar` columns are owned by this feature's auth half (Person 1), while `is_active`/subscription columns belong to Person 2's paywall. Column names below are the raw SQL names; the API layer aliases them to camelCase (e.g. `analysis_text` → `analysisText`).
+Three features' worth of schema. The two tables that back the AI analysis feature are defined in `server/src/db/schema.sql` (and originally introduced by `server/src/db/migrations/011_add_ai_analysis_history.sql`, `012_add_ai_analysis_title.sql`, and `013_add_ai_preferences.sql`). Neither "Sign in with Google" nor "Sign in with Microsoft" adds a new table — both extend the shared `users` table (see `server/src/db/migrations/014_add_google_oauth.sql` and `015_add_microsoft_oauth.sql`). All three reference/live on `users(id)`, which is shared infrastructure — its `id`/`email`/`password_hash`/`google_id`/`microsoft_id`/`name`/`avatar` columns are owned by this feature's auth half (Person 1), while `is_active`/subscription columns belong to Person 2's paywall. Column names below are the raw SQL names; the API layer aliases them to camelCase (e.g. `analysis_text` → `analysisText`).
 
 ## Tables I own
 
@@ -77,3 +77,17 @@ Both tables reference `users(id)` with `ON DELETE CASCADE`, so deleting a user's
 - **Why not a separate `google_id` on its own table?** One Google account maps to exactly one app account, same cardinality as `email` — a column on `users` with a `UNIQUE` constraint is the simplest way to enforce "a given Google identity can only ever be linked to one account" at the database level, same reasoning as `email UNIQUE`.
 - **Backward compatibility:** every pre-existing row keeps `google_id = NULL` and its existing `password_hash` — nothing about password login changes. The migration is idempotent (checks `information_schema` before altering), same pattern as the other numbered migrations in this directory.
 - **Edge case not yet covered:** account-deletion/password-change re-confirm the current password (`authService.verifyPassword`) before proceeding — a Google-only account (`password_hash = NULL`) has no password to re-confirm with, so those two flows are not yet reachable for a Google-only user. Out of scope for this pass; would need a "set a password" flow first.
+
+## `users` — Microsoft OAuth column (migration 015)
+
+"Sign in with Microsoft" is the same shape as Google's addition above, one column instead of two — `password_hash` is already nullable as of migration 014, so there's nothing further to relax. Added in `server/src/db/migrations/015_add_microsoft_oauth.sql` (and mirrored directly in `schema.sql` for fresh installs), placed immediately after `google_id`:
+
+| Column | Type | Null | Key | Notes |
+|---|---|---|---|---|
+| `microsoft_id` | VARCHAR(255) | Yes | UNIQUE | The stable Microsoft account id (`id` from the Graph `/me` response, scoped to the tenant). `NULL` for accounts with no linked Microsoft sign-in. Set the first time a user signs in with Microsoft — either on a brand-new row, or written onto an existing account (password- or Google-linked) that shares the same email. See `auth.service.js`'s `findOrCreateMicrosoftUser()`. |
+
+- **Same reasoning as `google_id`** for the column-not-table and `UNIQUE` constraint choices — see above.
+- **Backward compatibility:** every pre-existing row (including ones created after migration 014) keeps `microsoft_id = NULL`; nothing about password or Google login changes. Same idempotent `information_schema`-guarded migration pattern.
+- **Weaker email-ownership guarantee than Google's.** `findOrCreateGoogleUser()` only links onto an existing account after checking Google's `email_verified: true` claim. Microsoft Graph's `/me` has no equivalent flag - `microsoftOAuth.service.js`'s `exchangeCodeForProfile()` uses `mail` (verified by Microsoft/the org) when present, but falls back to `userPrincipalName` (the sign-in identifier - typically, but not guaranteedly, a real mailbox) for Azure AD accounts with no mailbox assigned. In practice this only matters for the account-linking case (UC-13) - flagged for review, not yet resolved. A stricter fix would be to only auto-link when `mail` (not `userPrincipalName`) matches, and require explicit confirmation otherwise.
+- **No avatar.** Unlike Google's `picture` claim, Microsoft Graph requires a separate authenticated call for a profile photo; `findOrCreateMicrosoftUser()` is always called with `avatar: null`, so Microsoft-created accounts start with no photo (same as any account that has never set one) rather than a `NULL` sentinel triggering special handling.
+- **Edge case not yet covered:** same as `google_id`'s note - a Microsoft-only account (`password_hash = NULL`) can't use the account-deletion/password-change re-confirmation flows, which require a real password.

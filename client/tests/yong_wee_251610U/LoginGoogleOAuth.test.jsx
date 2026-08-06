@@ -67,7 +67,10 @@ describe("Login - Google OAuth", () => {
     api.get.mockRejectedValue(new Error("session lookup failed"));
     const { login } = renderLogin("/login?oauth=success");
 
-    expect(await screen.findByText(/google sign-in failed/i)).toBeInTheDocument();
+    // Generic message since ?oauth=success is shared by both OAuth providers
+    // (see LoginMicrosoftOAuth.test.jsx) - the failure here is GET /auth/me,
+    // not anything Google-specific.
+    expect(await screen.findByText(/sign-in failed/i)).toBeInTheDocument();
     expect(login).not.toHaveBeenCalled();
   });
 

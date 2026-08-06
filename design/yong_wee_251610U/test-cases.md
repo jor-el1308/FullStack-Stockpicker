@@ -1,13 +1,14 @@
-# Test Cases — AI Stock Analysis & Google OAuth
+# Test Cases — AI Stock Analysis & Google/Microsoft OAuth
 
 **Owner:** Yong Wee (Person 1) · **Framework:** Vitest (backend: Node environment + mocked MySQL pool/fetch; frontend: Vitest + React Testing Library / jsdom)
 
-Backend and frontend unit tests for two features:
+Backend and frontend unit tests for three features:
 
 - **AI qualitative analysis:** `ai.service.js` (prompt building + Gemini/OpenRouter calls), `aiHistory.service.js` / `aiPreferences.service.js` (persistence), `ai.controller.js` / `aiPreferences.controller.js` (validation + HTTP mapping), and the React side (`AiComparisonTable`, `AiHistory`, the "Analyze with AI" flow on `Screener`, and the `api/ai.js` / `api/aiPreferences.js` clients).
 - **"Sign in with Google":** `googleOAuth.service.js` (Google URL building, state generation, code-for-profile exchange), `auth.service.js`'s `findOrCreateGoogleUser`/`findUserByGoogleId` (account matching/linking/creation), `auth.controller.js`'s `googleOAuthStart`/`googleOAuthCallback` (the CSRF state cookie round trip, error redirects, session cookie issuance), and the React side (the Google button + the `?oauth=success|error` redirect handling on `Login.jsx`).
+- **"Sign in with Microsoft":** a file-for-file mirror of the Google suite above — `microsoftOAuth.service.js` (Microsoft identity platform URL building against the configured tenant, state generation, code-for-profile exchange via Microsoft Graph), `auth.service.js`'s `findOrCreateMicrosoftUser`/`findUserByMicrosoftId`, `auth.controller.js`'s `microsoftOAuthStart`/`microsoftOAuthCallback`, and the Microsoft button + shared `?oauth=success|error` handling on `Login.jsx`.
 
-**All 98 tests pass** (64 backend + 34 frontend), of which 20 backend + 6 frontend are new for Google OAuth. (These counts are scoped to this owner's test files, `server/tests/yong_wee_251610U/` and `client/tests/yong_wee_251610U/` — running `npm test` in `client/` also runs other owners' tests alongside these.)
+**All 122 tests pass** (85 backend + 37 frontend), of which 21 backend + 3 frontend are new for Microsoft OAuth (on top of the 20 backend + 6 frontend that were new for Google OAuth). (These counts are scoped to this owner's test files, `server/tests/yong_wee_251610U/` and `client/tests/yong_wee_251610U/` — running `npm test` in `client/` also runs other owners' tests alongside these.)
 
 ## How to run
 
@@ -26,7 +27,7 @@ npm test        # runs client/tests/**/*.test.jsx once
 npm run test:watch   # re-runs on change
 ```
 
-Or from the repo root: `npm test --workspace=server` / `npm test --workspace=client`. Test files live in `server/tests/yong_wee_251610U/` and `client/tests/yong_wee_251610U/`. No real database, network call, AI API key, or Google OAuth credentials are needed for any of these — the MySQL pool, `fetch`, and the API-client/service modules are all mocked (see Notes).
+Or from the repo root: `npm test --workspace=server` / `npm test --workspace=client`. Test files live in `server/tests/yong_wee_251610U/` and `client/tests/yong_wee_251610U/`. No real database, network call, AI API key, or Google/Microsoft OAuth credentials are needed for any of these — the MySQL pool, `fetch`, and the API-client/service modules are all mocked (see Notes).
 
 ---
 
@@ -152,6 +153,48 @@ Building the Google consent URL, generating the CSRF `state` value, and exchangi
 | 7 | callback: happy path | Valid code + matching state | `exchangeCodeForProfile`/`findOrCreateGoogleUser`/`issueToken` called in order; `token` session cookie set; redirects with `oauth=success` |
 | 8 | callback: code exchange fails | `exchangeCodeForProfile` rejects | Redirects with `oauth=error`; `findOrCreateGoogleUser` never called (no account touched) |
 
+### `microsoftOAuth.service.js` (`microsoftOAuth.service.test.js`) — 9 cases
+
+Building the Microsoft consent URL (against the configured tenant), generating the CSRF `state` value, and exchanging an authorization code for a verified profile via Microsoft Graph. `global.fetch` is stubbed. One case more than the Google equivalent because tenant selection is an extra axis Google's flow doesn't have.
+
+| # | Test | What it checks | Expected outcome |
+|---|---|---|---|
+| 1 | state uniqueness | `generateOAuthState` called twice | Two different, URL-safe, non-trivially-short values |
+| 2 | auth URL shape (default tenant) | `buildMicrosoftAuthUrl` with a given state, `MS_TENANT_ID=common` | Points at `login.microsoftonline.com/common/oauth2/v2.0/authorize` with correct `client_id`/`redirect_uri`/`response_type`/`scope`/`state` |
+| 3 | auth URL shape (specific tenant) | `MS_TENANT_ID` set to an org's tenant id | URL path uses that tenant id instead of `common` |
+| 4 | missing client id | `MS_CLIENT_ID` unset | Throws `/MS_CLIENT_ID is not set/` |
+| 5 | code exchange happy path | Valid code | Token endpoint (`login.microsoftonline.com/common/oauth2/v2.0/token`) called with `code`/`client_secret`/`grant_type`; Graph `/me` called with `Authorization: Bearer <access_token>`; returns `{microsoftId, email, name, avatar: null}` |
+| 6 | email/name fallbacks | Profile has no `mail`, only `userPrincipalName`; no `displayName` | Email lower-cased from `userPrincipalName`; `name` falls back to the pre-lowercase email (same pattern as Google's `name` fallback) |
+| 7 | token exchange HTTP failure | Non-2xx from the token endpoint | Rejects with `/token exchange failed \(400\)/` |
+| 8 | Graph profile fetch HTTP failure | Non-2xx from Graph `/me` | Rejects with `/profile fetch failed \(401\)/` |
+| 9 | no usable email | Both `mail` and `userPrincipalName` absent | Rejects with `/no usable email/` |
+
+### `auth.service.js` — Microsoft persistence (`microsoftOAuthUser.service.test.js`) — 4 cases
+
+`findUserByMicrosoftId` and `findOrCreateMicrosoftUser` — account matching/linking/creation, mirroring the Google persistence tests exactly. `pool` is mocked.
+
+| # | Test | What it checks | Expected outcome |
+|---|---|---|---|
+| 1 | lookup by microsoft_id, no match | `findUserByMicrosoftId` with an unknown id | Returns `null`; SQL filters on `microsoft_id = ?` |
+| 2 | repeat sign-in | `microsoft_id` already linked to a user | Returns that user immediately; only one query runs (no email lookup, no write) |
+| 3 | link onto existing account | No `microsoft_id` match, but the email matches an existing account | `UPDATE users SET microsoft_id = ?` runs on that row's id; returns the refreshed user |
+| 4 | brand-new account | Neither `microsoft_id` nor email matches | `INSERT INTO users` runs with `microsoft_id` set and no password; returns the newly created user |
+
+### `auth.controller.js` — Microsoft OAuth (`microsoftOAuth.controller.test.js`) — 8 cases
+
+`microsoftOAuthStart`/`microsoftOAuthCallback` — the CSRF state cookie round trip, every error-redirect branch, and the happy path, mirroring the Google controller tests exactly (including the separate `ms_oauth_state` cookie name, so a flow started against one provider can't complete against the other's callback). `microsoftOAuth.service.js` and the Microsoft half of `auth.service.js` are mocked.
+
+| # | Test | What it checks | Expected outcome |
+|---|---|---|---|
+| 1 | start: happy path | `microsoftOAuthStart` | Sets `ms_oauth_state` httpOnly cookie; redirects to the built Microsoft URL |
+| 2 | start: misconfiguration | `generateOAuthState` throws (e.g. missing client id) | Redirects to `/login?oauth=error` instead of crashing |
+| 3 | callback: consent denied | `?error=access_denied` | Redirects with `oauth=error&message=Microsoft+sign-in+was+cancelled`; `exchangeCodeForProfile` never called |
+| 4 | callback: state mismatch (CSRF) | `state` query param ≠ `ms_oauth_state` cookie | Redirects with a "session expired" message; `exchangeCodeForProfile` never called |
+| 5 | callback: missing code | No `code` in the query string | Same "session expired" redirect |
+| 6 | callback: state cookie always cleared | Any callback outcome | `res.clearCookie("ms_oauth_state")` called regardless of success/failure |
+| 7 | callback: happy path | Valid code + matching state | `exchangeCodeForProfile`/`findOrCreateMicrosoftUser`/`issueToken` called in order; `token` session cookie set; redirects with `oauth=success` |
+| 8 | callback: code exchange fails | `exchangeCodeForProfile` rejects | Redirects with `oauth=error`; `findOrCreateMicrosoftUser` never called (no account touched) |
+
 ---
 
 ## Frontend tests
@@ -219,16 +262,27 @@ Covers the Google-specific pieces of `Login.jsx`: the button itself and the effe
 | 1 | Google button | Rendered on `/login` with no query string | A link named "Continue with Google" with `href="/api/auth/oauth/google"` |
 | 2 | success → active account | `?oauth=success`, `GET /auth/me` resolves with `isActive: true` | `login(user)` called; app navigates to the screener (`/`) |
 | 3 | success → inactive account | Same, but `isActive: false` | Navigates to `/activate` instead |
-| 4 | success but `/auth/me` fails | `GET /auth/me` rejects | Inline "Google sign-in failed…" shown; `login()` never called |
+| 4 | success but `/auth/me` fails | `GET /auth/me` rejects | Generic inline "Sign-in failed…" shown (the `?oauth=success` effect is shared by both providers, so the message no longer names Google specifically); `login()` never called |
 | 5 | server-side error | `?oauth=error&message=Google+sign-in+was+cancelled` | That exact message shown inline; `GET /auth/me` never called |
 | 6 | already logged in | `user` already set (from `useAuth`) | Renders the account panel, not the form/button |
+
+### Login — Microsoft OAuth (`LoginMicrosoftOAuth.test.jsx`) — 3 cases
+
+Covers the Microsoft-specific pieces of `Login.jsx`: the button itself, and confirms it renders alongside (not instead of) the Google button. Deliberately smaller than the Google suite above — the `?oauth=success` routing-by-`isActive` logic and the "already logged in" case are provider-agnostic (same shared effect/component, already covered by `LoginGoogleOAuth.test.jsx`), so only the Microsoft-specific button and the Microsoft-flavored `?oauth=error` message are re-tested here. `api/client.js` and `AuthContext` are both mocked, same setup as the Google test file.
+
+| # | Test | What it checks | Expected outcome |
+|---|---|---|---|
+| 1 | Microsoft button | Rendered on `/login` with no query string | A link named "Continue with Microsoft" with `href="/api/auth/oauth/microsoft"`, alongside the Google link |
+| 2 | success → active account | `?oauth=success`, `GET /auth/me` resolves with `isActive: true` | `login(user)` called; app navigates to the screener (`/`) — same shared effect as Google's |
+| 3 | server-side error | `?oauth=error&message=Microsoft+sign-in+was+cancelled` | That exact message shown inline; `GET /auth/me` never called |
 
 ---
 
 ## Notes
 
-- **No real AI provider, database, network call, or Google OAuth credentials are used anywhere in this suite.** Backend tests mock `server/src/config/db.js`'s `pool` and the global `fetch`; frontend tests mock the `api/ai.js` / `api/aiPreferences.js` / `api/client.js` and `AuthContext` modules (or `fetch` directly for the client tests). This keeps the suite fast and deterministic, and safe to run without an `.env` or a live MySQL instance.
+- **No real AI provider, database, network call, or Google/Microsoft OAuth credentials are used anywhere in this suite.** Backend tests mock `server/src/config/db.js`'s `pool` and the global `fetch`; frontend tests mock the `api/ai.js` / `api/aiPreferences.js` / `api/client.js` and `AuthContext` modules (or `fetch` directly for the client tests). This keeps the suite fast and deterministic, and safe to run without an `.env` or a live MySQL instance.
 - **`ai.controller.test.js`'s `aiHistory.service.js` mock is a *partial* mock** (`vi.mock(..., async (importOriginal) => ({ ...await importOriginal(), saveAiAnalysis: vi.fn(), ... }))`) so the controller's real `instanceof AiAnalysisNotFoundError` check keeps working against the actual error class, while every exported function is still stubbable per test.
 - **Async assertions in `AiHistory.test.jsx` use `waitFor`** around the mocked API-call expectation before querying the resulting UI text, rather than asserting immediately after `fireEvent.click`. The component's save/delete handlers are `async` functions that resolve after the click handler returns, so an immediate `expect` can race the state update; `waitFor`/`findBy*` poll until the DOM settles.
-- **`LoginGoogleOAuth.test.jsx` renders `Login` inside a `MemoryRouter` with sibling `/`/`/activate` routes** (rather than just `Login` alone) specifically so the post-redirect `navigate()` calls are observable as "which page rendered", not just "was `navigate` called with the right string" - closer to what a user actually sees.
+- **`LoginGoogleOAuth.test.jsx` renders `Login` inside a `MemoryRouter` with sibling `/`/`/activate` routes** (rather than just `Login` alone) specifically so the post-redirect `navigate()` calls are observable as "which page rendered", not just "was `navigate` called with the right string" - closer to what a user actually sees. `LoginMicrosoftOAuth.test.jsx` reuses the same `renderLogin` helper shape.
+- **The Microsoft OAuth test files (`microsoftOAuth.service.test.js`, `microsoftOAuthUser.service.test.js`, `microsoftOAuth.controller.test.js`, `LoginMicrosoftOAuth.test.jsx`) deliberately mirror their Google counterparts case-for-case** (with a couple of Microsoft-only additions - tenant selection in the auth-URL test, the `mail`/`userPrincipalName` fallback) rather than being written independently, since the implementation itself is a case-for-case mirror of the Google flow (`microsoftOAuth.service.js`/`microsoftOAuthStart`/`microsoftOAuthCallback`/`findOrCreateMicrosoftUser` next to their Google equivalents). The frontend suite is the one exception - see its note above for why it's smaller.
 - Interactions use `fireEvent` (not `@testing-library/user-event`, which isn't a project dependency) to match the existing convention in `client/tests/enrico_javier_wijaya_250504Z/`.

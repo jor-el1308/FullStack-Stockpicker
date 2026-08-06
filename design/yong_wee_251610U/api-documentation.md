@@ -1,8 +1,8 @@
-# API Documentation — AI Stock Analysis & Google OAuth
+# API Documentation — AI Stock Analysis & Google/Microsoft OAuth
 
 **Owner:** Yong Wee (Person 1)
 
-Two features: (1) the AI qualitative-analysis feature — running an analysis on shortlisted stocks, managing saved analysis history, and reading/updating a user's AI preferences (`server/src/routes/ai.routes.js`, `server/src/controllers/{ai,aiPreferences}.controller.js`, `server/src/services/{ai,aiHistory,aiPreferences}.service.js`); and (2) "Sign in with Google" — an alternate, password-less way to log in or sign up (`server/src/routes/auth.routes.js`'s `/oauth/google*` routes, `server/src/controllers/auth.controller.js`'s `googleOAuthStart`/`googleOAuthCallback`, `server/src/services/googleOAuth.service.js`, `server/src/services/auth.service.js`'s `findOrCreateGoogleUser`).
+Three features: (1) the AI qualitative-analysis feature — running an analysis on shortlisted stocks, managing saved analysis history, and reading/updating a user's AI preferences (`server/src/routes/ai.routes.js`, `server/src/controllers/{ai,aiPreferences}.controller.js`, `server/src/services/{ai,aiHistory,aiPreferences}.service.js`); (2) "Sign in with Google" — an alternate, password-less way to log in or sign up (`server/src/routes/auth.routes.js`'s `/oauth/google*` routes, `server/src/controllers/auth.controller.js`'s `googleOAuthStart`/`googleOAuthCallback`, `server/src/services/googleOAuth.service.js`, `server/src/services/auth.service.js`'s `findOrCreateGoogleUser`); and (3) "Sign in with Microsoft" — the same idea against a Microsoft/Azure AD account instead (`server/src/routes/auth.routes.js`'s `/oauth/microsoft*` routes, `server/src/controllers/auth.controller.js`'s `microsoftOAuthStart`/`microsoftOAuthCallback`, `server/src/services/microsoftOAuth.service.js`, `server/src/services/auth.service.js`'s `findOrCreateMicrosoftUser`).
 
 ## Conventions
 
@@ -306,3 +306,57 @@ Where Google redirects the browser back to after the user grants or denies conse
 2. **Environment variables required:** `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `OAUTH_SUCCESS_REDIRECT` — see `server/.env.example` for how to obtain them from the Google Cloud Console.
 3. **Account linking is by verified email, not user choice.** If someone already has a password account under `ada@example.com` and signs in with a Google account using that same address, the two are silently merged (the Google id is attached to the existing account) rather than erroring or creating a duplicate — safe because Google has already verified ownership of that address.
 4. **Google-only accounts have `password_hash = NULL`** (migration `014_add_google_oauth.sql`) — they can't use `POST /auth/login` until/unless a "set a password" flow is added; today, Google is their only way in.
+
+---
+
+# Microsoft OAuth ("Sign in with Microsoft")
+
+The same idea as Google OAuth above, against a Microsoft (personal or work/school Azure AD) account instead — same authorization-code flow, same `users` table, same account-linking-by-email behavior, deliberately kept as close to a copy-paste of the Google implementation as the two providers' APIs allow. Implemented in `server/src/routes/auth.routes.js` (`/oauth/microsoft*`), `server/src/controllers/auth.controller.js` (`microsoftOAuthStart`/`microsoftOAuthCallback`), `server/src/services/microsoftOAuth.service.js` (talking to the Microsoft identity platform + Microsoft Graph), and `server/src/services/auth.service.js`'s `findOrCreateMicrosoftUser` (matching/creating the local account).
+
+## Conventions
+
+Same as Google OAuth above: these two routes are full-page browser navigations, not JSON APIs (the client's Microsoft button, `client/src/pages/Login.jsx`, is a plain `<a href="/api/auth/oauth/microsoft">`), and both always respond with an HTTP redirect.
+
+## 1. `GET /api/auth/oauth/microsoft`
+
+Starts the flow. Generates a random CSRF `state` value, stores it in a short-lived (5 minute) httpOnly cookie (`ms_oauth_state` — a separate cookie name from Google's `g_oauth_state`, so a flow started against one provider can't be completed against the other's callback), and redirects the browser to the Microsoft identity platform's consent screen (`login.microsoftonline.com/<tenant>/oauth2/v2.0/authorize`, tenant from `MS_TENANT_ID`, default `common`) with `client_id`/`redirect_uri` from `MS_CLIENT_ID`/`MS_REDIRECT_URI`, `scope=openid email profile User.Read`, `prompt=select_account`, and that same `state`.
+
+- **Auth:** none (this *is* a login entry point).
+- **Rate limit:** `loginLimiter` (same as `POST /auth/login`).
+- **Response:** `302` to Microsoft. On misconfiguration (e.g. `MS_CLIENT_ID` unset), `302` back to `/login?oauth=error&message=...` instead of throwing a raw `500`.
+
+## 2. `GET /api/auth/oauth/microsoft/callback`
+
+Where Microsoft redirects the browser back to after the user grants or denies consent. Must exactly match `MS_REDIRECT_URI` as configured on the app registration in the Azure portal.
+
+- **Auth:** none.
+- **Rate limit:** `loginLimiter`.
+- **Query params (from Microsoft):** `code` (authorization code, present on consent) *or* `error` (e.g. `access_denied`, present on denial), plus the `state` echoed back unchanged.
+- **Main flow:**
+  1. Clears the `ms_oauth_state` cookie unconditionally (single-use).
+  2. If `error` is present, or `code`/`state` is missing, or `state` doesn't match the cookie (CSRF check) → redirect to `/login?oauth=error&message=<reason>`. `exchangeCodeForProfile`/`findOrCreateMicrosoftUser` are never called in this branch.
+  3. Otherwise: exchanges `code` for an access token, then fetches the profile (`id`, `mail`, `userPrincipalName`, `displayName`) from Microsoft Graph's `/me` via `microsoftOAuth.service.js`'s `exchangeCodeForProfile`.
+  4. `authService.findOrCreateMicrosoftUser(profile)` matches an existing account by `microsoft_id`, else links onto an existing account by email, else creates a brand-new account with no password.
+  5. Issues a normal session JWT (`authService.issueToken`) and sets it on the same httpOnly `token` cookie password login uses — **no email-OTP second factor** here, same reasoning as Google: Microsoft has already authenticated the user.
+  6. Redirects to `${OAUTH_SUCCESS_REDIRECT}/login?oauth=success`.
+- **Response:**
+  - **Success:** `302` to `/login?oauth=success` + the `token` session cookie set. The client then calls `GET /api/auth/me` to fetch the now-logged-in user (see `client/src/pages/Login.jsx`) — the exact same code path Google's success redirect uses, since both providers redirect to the same `?oauth=success` contract.
+  - **Failure** (denied consent, CSRF mismatch, missing code, failed token/profile fetch, no usable email, DB error): `302` to `/login?oauth=error&message=<human-readable reason>`. No cookie is set.
+
+## Error handling
+
+| Situation | Redirect target | Notes |
+|---|---|---|
+| User clicks "Cancel" on Microsoft's consent screen | `/login?oauth=error&message=Microsoft+sign-in+was+cancelled` | Microsoft sends `?error=access_denied` |
+| `state` cookie missing/expired or doesn't match | `/login?oauth=error&message=Microsoft+sign-in+session+expired...` | CSRF protection — see `microsoftOAuth.service.js`'s `generateOAuthState()` doc comment |
+| Microsoft account has no usable email (`mail`/`userPrincipalName` both absent) | `/login?oauth=error&message=Microsoft+sign-in+failed...` | `exchangeCodeForProfile` rejects before any DB write |
+| Token exchange / Graph profile fetch HTTP failure | `/login?oauth=error&message=Microsoft+sign-in+failed...` | Logged server-side with the real error; client only sees the generic message |
+| Everything else (DB error, etc.) | `/login?oauth=error&message=Microsoft+sign-in+failed...` | Same generic message, real error logged as `[auth] microsoftOAuthCallback failed: ...` |
+
+## Integration notes
+
+1. **No MSAL JS SDK on the client.** Same reasoning as Google — the "Continue with Microsoft" button is a plain link, not a `msal.loginRedirect(...)` call.
+2. **Environment variables required:** `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_TENANT_ID` (default `common`), `MS_REDIRECT_URI`, plus the already-shared `OAUTH_SUCCESS_REDIRECT` — see `server/.env.example` for how to obtain them from an Azure Entra ID app registration.
+3. **Account linking is by email, same as Google**, with one caveat: Microsoft Graph doesn't expose a Google-style `email_verified` flag on `/me`. `mail` (the account's real mailbox, verified by Microsoft or the org) is preferred; `userPrincipalName` (the sign-in identifier, typically email-shaped) is only used as a fallback for Azure AD accounts that have no mailbox assigned. This is a materially weaker guarantee than Google's explicit `email_verified: true` check — see Database Schema doc for the accepted risk.
+4. **No profile photo is fetched.** Unlike Google's `picture` field, Microsoft Graph requires a separate binary call (`/me/photo/$value`) to get an avatar; out of scope for this pass, so Microsoft-created accounts always start with `avatar = NULL` (same as any account with no photo set).
+5. **Microsoft-only accounts have `password_hash = NULL`**, same as Google-only accounts (migration `015_add_microsoft_oauth.sql`) — they can't use `POST /auth/login` until/unless a "set a password" flow is added; today, Microsoft is their only way in.
