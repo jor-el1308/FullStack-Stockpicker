@@ -24,6 +24,10 @@ router.post("/logout", authController.logout);
 // password login route. See auth.controller.js / googleOAuth.service.js.
 router.get("/oauth/google", loginLimiter, authController.googleOAuthStart);
 router.get("/oauth/google/callback", loginLimiter, authController.googleOAuthCallback);
+// "Sign in with Microsoft" - same shape as the Google routes above. See
+// auth.controller.js / microsoftOAuth.service.js.
+router.get("/oauth/microsoft", loginLimiter, authController.microsoftOAuthStart);
+router.get("/oauth/microsoft/callback", loginLimiter, authController.microsoftOAuthCallback);
 router.get("/me", requireAuth, authController.getProfile);
 // Edit own profile - display name only ({ name }). Email changes go through
 // the verified two-step flow below. See auth.controller.js updateProfile().

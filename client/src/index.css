@@ -403,10 +403,19 @@ a, button {
   background: var(--color-border-dark);
 }
 
-/* "Sign in with Google" button - kept white/light regardless of theme, per
-   Google's branding guidelines for third-party sign-in buttons, so it reads
-   distinctly from the app's own (blue) primary action button above it. */
-.auth-google-button {
+/* Stacks the Google and Microsoft sign-in buttons below the divider. */
+.auth-oauth-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* "Sign in with Google" / "Sign in with Microsoft" buttons - both kept
+   white/light regardless of theme, per each provider's branding guidelines
+   for third-party sign-in buttons, so they read distinctly from the app's
+   own (blue) primary action button above them. */
+.auth-google-button,
+.auth-microsoft-button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -425,12 +434,14 @@ a, button {
   transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
-.auth-google-button:hover {
+.auth-google-button:hover,
+.auth-microsoft-button:hover {
   background: #f5f5f5;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 
-.auth-google-button svg {
+.auth-google-button svg,
+.auth-microsoft-button svg {
   flex-shrink: 0;
 }
 

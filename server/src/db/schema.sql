@@ -116,6 +116,11 @@ CREATE TABLE IF NOT EXISTS users (
   -- onto an existing password account with the same (Google-verified)
   -- email. See auth.service.js's findOrCreateGoogleUser() and migration 014.
   google_id     VARCHAR(255) NULL UNIQUE,
+  -- Microsoft account id ("oid" claim, scoped to the tenant) for accounts
+  -- that have linked "Sign in with Microsoft" - NULL for accounts that
+  -- haven't. Same linking behavior as google_id above. See
+  -- auth.service.js's findOrCreateMicrosoftUser() and migration 015.
+  microsoft_id  VARCHAR(255) NULL UNIQUE,
   -- Profile picture (Person 1), stored inline as a resized/compressed data
   -- URL so there's no separate file store. NULL = no photo set, UI falls
   -- back to initials. Size is capped in the API + by the client resize; see

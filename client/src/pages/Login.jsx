@@ -16,15 +16,17 @@
  * is unchanged except for an added "Confirm Password" field, checked
  * client-side before submitting.
  *
- * "Sign in with Google" (Person 1): the button below is a plain link to
- * GET /api/auth/oauth/google (server/src/controllers/auth.controller.js) -
- * a full-page navigation, not a fetch call, since the OAuth flow needs the
- * browser to actually visit Google's consent screen. Google redirects back
- * to this same page with an `oauth=success` or `oauth=error` query string
- * (see googleOAuthCallback()), which the effect in Login() below picks up:
- * on success it fetches the now-logged-in user via GET /auth/me (the
- * session cookie was already set server-side) and finishes login the same
- * way password login does; on error it just surfaces the message.
+ * "Sign in with Google" / "Sign in with Microsoft" (Person 1): the buttons
+ * below are plain links to GET /api/auth/oauth/google and
+ * /api/auth/oauth/microsoft (server/src/controllers/auth.controller.js) -
+ * full-page navigations, not fetch calls, since the OAuth flow needs the
+ * browser to actually visit the provider's consent screen. Either provider
+ * redirects back to this same page with an `oauth=success` or `oauth=error`
+ * query string (see googleOAuthCallback()/microsoftOAuthCallback()), which
+ * the effect in Login() below picks up: on success it fetches the
+ * now-logged-in user via GET /auth/me (the session cookie was already set
+ * server-side) and finishes login the same way password login does; on
+ * error it just surfaces the message.
  */
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -48,8 +50,8 @@ export default function Login() {
   const [searchParams] = useSearchParams();
   const [oauthError, setOauthError] = useState("");
   // Only true while we still need to fetch the freshly-logged-in user after
-  // a successful Google redirect - avoids flashing the empty login form for
-  // the split second before that GET /auth/me resolves.
+  // a successful Google/Microsoft redirect - avoids flashing the empty
+  // login form for the split second before that GET /auth/me resolves.
   const [checkingOAuth, setCheckingOAuth] = useState(searchParams.get("oauth") === "success");
 
   useEffect(() => {
@@ -62,12 +64,12 @@ export default function Login() {
           navigate(freshUser.isActive ? "/" : "/activate", { replace: true });
         })
         .catch(() => {
-          setOauthError("Google sign-in failed - please try again.");
+          setOauthError("Sign-in failed - please try again.");
           setCheckingOAuth(false);
           navigate("/login", { replace: true });
         });
     } else if (oauth === "error") {
-      setOauthError(searchParams.get("message") || "Google sign-in failed - please try again.");
+      setOauthError(searchParams.get("message") || "Sign-in failed - please try again.");
       navigate("/login", { replace: true });
     }
     // Only ever meant to run once, against whatever query string this page
@@ -81,7 +83,7 @@ export default function Login() {
         <div className="auth-dark-hero" />
         <aside className="auth-dark-sidebar">
           <div className="auth-dark-content">
-            <p className="auth-dark-subtitle">Signing you in with Google...</p>
+            <p className="auth-dark-subtitle">Signing you in...</p>
           </div>
         </aside>
       </div>
@@ -276,14 +278,21 @@ function AuthForm({ onAuthenticated, oauthError }) {
               <div className="auth-dark-divider">
                 <span>or</span>
               </div>
-              {/* Full-page link (not a fetch/onClick) to GET /api/auth/oauth/google -
-                  the browser needs to actually navigate to Google's consent screen.
-                  Works for both login and signup: a first-time Google sign-in
-                  creates the account automatically (see findOrCreateGoogleUser()). */}
-              <a href="/api/auth/oauth/google" className="auth-google-button">
-                <GoogleLogo />
-                Continue with Google
-              </a>
+              {/* Full-page links (not fetch/onClick) to GET /api/auth/oauth/google
+                  and /api/auth/oauth/microsoft - the browser needs to actually
+                  navigate to the provider's consent screen. Works for both login
+                  and signup: a first-time sign-in creates the account
+                  automatically (see findOrCreateGoogleUser()/findOrCreateMicrosoftUser()). */}
+              <div className="auth-oauth-buttons">
+                <a href="/api/auth/oauth/google" className="auth-google-button">
+                  <GoogleLogo />
+                  Continue with Google
+                </a>
+                <a href="/api/auth/oauth/microsoft" className="auth-microsoft-button">
+                  <MicrosoftLogo />
+                  Continue with Microsoft
+                </a>
+              </div>
 
               <p className="auth-dark-footer">
                 {mode === "login" ? "Need an account? " : "Already have an account? "}
@@ -368,6 +377,19 @@ function GoogleLogo() {
         fill="#EA4335"
         d="M9 3.5795c1.3214 0 2.5077.4541 3.4405 1.3459l2.5813-2.5814C13.4632.8918 11.4259 0 9 0 5.4818 0 2.4382 2.0168.9573 4.9582L3.9641 7.29C4.6718 5.1627 6.6564 3.5795 9 3.5795z"
       />
+    </svg>
+  );
+}
+
+// Microsoft's official four-square logo mark, per Microsoft's branding
+// guidelines for third-party "Sign in with Microsoft" buttons.
+function MicrosoftLogo() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <rect x="1" y="1" width="7.5" height="7.5" fill="#F25022" />
+      <rect x="9.5" y="1" width="7.5" height="7.5" fill="#7FBA00" />
+      <rect x="1" y="9.5" width="7.5" height="7.5" fill="#00A4EF" />
+      <rect x="9.5" y="9.5" width="7.5" height="7.5" fill="#FFB900" />
     </svg>
   );
 }

@@ -29,7 +29,7 @@ shared/     Shared JSDoc typedefs (ScreenerRequest, StockDetail, etc.)
 
 | Person | Area | Individual feature | Main folders |
 |---|---|---|---|
-| 1 — Yong Wee | Auth + AI Recommendation | After a user runs a screen, send the shortlisted stocks to an AI model for qualitative analysis (recent news, growth outlook, reasoning) | `server/src/{routes,controllers,services}/auth.*`, `client/src/pages/Login.jsx` |
+| 1 — Yong Wee | OAuth + AI Recommendation | After a user runs a screen, send the shortlisted stocks to an AI model for qualitative analysis (recent news, growth outlook, reasoning) | `server/src/{routes,controllers,services}/auth.*`, `client/src/pages/Login.jsx` |
 | 2 — Charles | Data Pipeline + Subscription/Paywall + Admin Dashboard | Subscription/payment page - new users pay to activate their account before accessing anything else | `server/src/db/schema.sql`, `ingestion/` (yfinance pipeline), `server/src/{routes,controllers,services}/{subscription,admin}.*`, `client/src/pages/{Activate,Admin}.jsx` |
 | 3 — Jorel | Stock Screener / Filter Engine | Range-based filtering across criteria (market cap, revenue, dividend yield, PAT, EBITA, etc.), default filter values, company-age exclusion, sector exclusions | `server/src/{routes,controllers,services}/screener.*`, `client/src/pages/Screener.jsx` |
 | 4 — Enrico | Dashboard + Stock Report Page | Screener results table and per-stock detail page - closing price chart, 52-week high/low, key criteria values | `server/src/{routes,controllers}/dashboard.*`, `client/src/pages/{Dashboard,StockDetail}.jsx`, `client/src/components/ResultsTable.jsx` |

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import * as authService from "../services/auth.service.js";
 import * as googleOAuthService from "../services/googleOAuth.service.js";
+import * as microsoftOAuthService from "../services/microsoftOAuth.service.js";
 import { sendOtpEmail, sendEmailChangeOtpEmail } from "../utils/mailer.js";
 import { parseDurationMs } from "../config/jwt.js";
 import { sendInternalError } from "../utils/errors.js";
@@ -246,9 +247,13 @@ export function logout(_req, res) {
   res.json({ success: true, data: { loggedOut: true } });
 }
 
-// Short-lived cookie holding the CSRF `state` value for the Google OAuth
-// round trip - see googleOAuthService.generateOAuthState().
+// Short-lived cookies holding the CSRF `state` value for each provider's
+// OAuth round trip - see googleOAuthService/microsoftOAuthService's
+// generateOAuthState(). Separate cookies (rather than one shared name) so a
+// Google flow started in one tab can't be completed against a Microsoft
+// callback URL or vice versa.
 const OAUTH_STATE_COOKIE = "g_oauth_state";
+const MS_OAUTH_STATE_COOKIE = "ms_oauth_state";
 
 function getOAuthClientBaseUrl() {
   return process.env.OAUTH_SUCCESS_REDIRECT?.trim() || "http://localhost:5173/";
@@ -331,6 +336,59 @@ export async function googleOAuthCallback(req, res) {
   } catch (err) {
     console.error("[auth] googleOAuthCallback failed:", err.message);
     redirectToLogin(res, { oauth: "error", message: "Google sign-in failed - please try again" });
+  }
+}
+
+/**
+ * Step 1 of "Sign in with Microsoft" - mirrors googleOAuthStart() exactly,
+ * against microsoftOAuthService instead.
+ */
+export function microsoftOAuthStart(_req, res) {
+  try {
+    const state = microsoftOAuthService.generateOAuthState();
+    res.cookie(MS_OAUTH_STATE_COOKIE, state, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 5 * 60 * 1000,
+    });
+    res.redirect(microsoftOAuthService.buildMicrosoftAuthUrl(state));
+  } catch (err) {
+    console.error("[auth] microsoftOAuthStart failed:", err.message);
+    redirectToLogin(res, { oauth: "error", message: "Microsoft sign-in is not available right now" });
+  }
+}
+
+/**
+ * Step 2: mirrors googleOAuthCallback() exactly, against
+ * microsoftOAuthService/authService.findOrCreateMicrosoftUser() instead. Same
+ * NOTE as googleOAuthCallback() applies here - Microsoft has already
+ * authenticated the user, so this also skips the email-OTP second factor.
+ */
+export async function microsoftOAuthCallback(req, res) {
+  const { code, state, error: msError } = req.query;
+  const expectedState = req.cookies?.[MS_OAUTH_STATE_COOKIE];
+  res.clearCookie(MS_OAUTH_STATE_COOKIE);
+
+  if (msError) {
+    return redirectToLogin(res, { oauth: "error", message: "Microsoft sign-in was cancelled" });
+  }
+  if (!code || !state || !expectedState || state !== expectedState) {
+    return redirectToLogin(res, {
+      oauth: "error",
+      message: "Microsoft sign-in session expired - please try again",
+    });
+  }
+
+  try {
+    const profile = await microsoftOAuthService.exchangeCodeForProfile(code);
+    const user = await authService.findOrCreateMicrosoftUser(profile);
+    const token = authService.issueToken(user);
+    setSessionCookie(res, token);
+    redirectToLogin(res, { oauth: "success" });
+  } catch (err) {
+    console.error("[auth] microsoftOAuthCallback failed:", err.message);
+    redirectToLogin(res, { oauth: "error", message: "Microsoft sign-in failed - please try again" });
   }
 }
 
