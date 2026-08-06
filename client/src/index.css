@@ -765,6 +765,47 @@ a, button {
   font-weight: 600;
 }
 
+/* Follow-up chat thread (AiChatBox on the Screener AI panel, and the
+   read-only client-side sessions shown on the AI Analysis History page) */
+.ai-chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.ai-chat-bubble {
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.ai-chat-bubble.user {
+  align-self: flex-end;
+  background: var(--color-clickable);
+  color: #ffffff;
+  border-bottom-right-radius: 4px;
+}
+
+.ai-chat-bubble.assistant {
+  align-self: flex-start;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  border-bottom-left-radius: 4px;
+}
+
+.ai-chat-typing {
+  opacity: 0.6;
+  font-style: italic;
+}
+
 /* Filter sections (Advanced Filters) */
 .filter-section {
   margin-bottom: 16px;

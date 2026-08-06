@@ -7,9 +7,11 @@
  * that was analyzed, editable analysis text, and a delete action.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Sparkles, Clock, Pencil, Trash2 } from "lucide-react";
+import { Sparkles, MessageCircle, Clock, Pencil, Trash2 } from "lucide-react";
 import { getAiHistory, updateAiHistoryEntry, deleteAiHistoryEntry } from "../api/ai";
 import AiComparisonTable from "../components/AiComparisonTable";
+import { parseComparison } from "../lib/aiAnalysisFormat";
+import { listChatSessions, deleteChatSession } from "../lib/aiChatStorage";
 
 function formatDateTime(value) {
   return new Date(value).toLocaleString(undefined, {
@@ -21,22 +23,12 @@ function formatDateTime(value) {
   });
 }
 
-/**
- * Runs analyzing 2+ stocks are saved as a structured comparison object
- * (JSON.stringify'd - see ai.controller.js) rather than free text. Detects
- * that shape on read so AiComparisonTable can render it, while older/
- * single-stock rows (plain text) fall through to splitAnalysisByStock below.
- * @param {string} analysisText
- * @returns {{stocks: string[], criteria: Array<object>} | null}
- */
-function parseComparison(analysisText) {
-  try {
-    const parsed = JSON.parse(analysisText);
-    if (parsed && Array.isArray(parsed.stocks) && Array.isArray(parsed.criteria)) return parsed;
-  } catch {
-    // Not JSON - a normal free-text single-stock write-up.
-  }
-  return null;
+// Mirrors aiHistory.service.js's title generation for a comparable at-a-glance
+// label on client-side chat sessions, which don't get a server-assigned title.
+function titleForStocks(stocks) {
+  if (!stocks?.length) return "Follow-up conversation";
+  const names = stocks.map((s) => s.stockName);
+  return names.length > 3 ? `${names.slice(0, 3).join(", ")} +${names.length - 3} more` : names.join(", ");
 }
 
 /**
@@ -333,9 +325,105 @@ function HistoryEntry({ entry, onDeleted }) {
   );
 }
 
+/**
+ * Read-only card for a client-side-only follow-up chat transcript (see
+ * aiChatStorage.js / AiChatBox.jsx). Not backed by the database yet - this is
+ * a prototype of "conversations show up in history" that only persists to
+ * this browser's localStorage, so it's labelled as such rather than blending
+ * in silently with the real, account-synced runs above.
+ */
+function ChatSessionEntry({ session, onDeleted }) {
+  const comparison = useMemo(
+    () => (session.mode === "comparison" ? parseComparison(session.originalAnalysis) : null),
+    [session]
+  );
+  const [deleting, setDeleting] = useState(false);
+
+  function handleDelete() {
+    if (!window.confirm("Delete this follow-up conversation? This can't be undone.")) return;
+    setDeleting(true);
+    deleteChatSession(session.id);
+    onDeleted(session.id);
+  }
+
+  return (
+    <div className="card card-pad" style={{ marginBottom: 16, opacity: deleting ? 0.5 : 1 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0, flex: "1 1 260px" }}>
+          <span
+            style={{
+              fontFamily: "var(--font-title)",
+              fontWeight: 600,
+              fontSize: 14,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <MessageCircle size={14} color="var(--color-special)" />
+            {titleForStocks(session.stocks)}
+          </span>
+          <div className="page-subtitle" style={{ marginTop: 4, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <span className="chip">Follow-up chat · this browser only</span>
+            {session.preferences?.aiPersona && <span className="chip">{session.preferences.aiPersona} persona</span>}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span className="page-subtitle" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Clock size={12} />
+            {formatDateTime(session.updatedAt)}
+          </span>
+          <button
+            type="button"
+            className="btn btn-danger"
+            onClick={handleDelete}
+            disabled={deleting}
+            aria-label="Delete conversation"
+            style={{ padding: "4px 8px" }}
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+
+      <details style={{ marginTop: 12 }}>
+        <summary style={{ cursor: "pointer", fontFamily: "var(--font-title)", fontSize: 12, color: "var(--color-muted-text)" }}>
+          Original analysis
+        </summary>
+        {comparison ? (
+          <AiComparisonTable comparison={comparison} />
+        ) : (
+          <div
+            style={{
+              marginTop: 8,
+              fontFamily: "var(--font-body)",
+              fontSize: 14,
+              lineHeight: 1.6,
+              color: "var(--color-text)",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {session.originalAnalysis}
+          </div>
+        )}
+      </details>
+
+      <div className="ai-chat-thread" style={{ marginTop: 12 }}>
+        {session.messages.map((m, i) => (
+          <div key={i} className={`ai-chat-bubble ${m.role}`}>
+            {m.content}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function AiHistory() {
   const [history, setHistory] = useState(null);
   const [error, setError] = useState(null);
+  const [chatSessions, setChatSessions] = useState(() => listChatSessions());
 
   useEffect(() => {
     let cancelled = false;
@@ -355,14 +443,26 @@ export default function AiHistory() {
     setHistory((prev) => prev.filter((e) => e.id !== id));
   }
 
+  function handleChatDeleted(id) {
+    setChatSessions((prev) => prev.filter((s) => s.id !== id));
+  }
+
+  // Merged chronologically so a follow-up conversation shows up right next
+  // to the analysis it continues, rather than in a separate section.
+  const combined = useMemo(() => {
+    const analysisItems = (history ?? []).map((entry) => ({ kind: "analysis", at: entry.createdAt, entry }));
+    const chatItems = chatSessions.map((session) => ({ kind: "chat", at: session.updatedAt, entry: session }));
+    return [...analysisItems, ...chatItems].sort((a, b) => new Date(b.at) - new Date(a.at));
+  }, [history, chatSessions]);
+
   return (
     <section>
       <div className="page-head">
         <div>
           <h1 className="page-title">AI Analysis History</h1>
           <p className="page-subtitle">
-            Every "Analyze with AI" run from the Screener, latest first. Rename a run, switch between stock tabs, or
-            edit the write-up directly.
+            Every "Analyze with AI" run from the Screener, latest first, plus any follow-up conversations you've had
+            about them. Rename a run, switch between stock tabs, or edit the write-up directly.
           </p>
         </div>
       </div>
@@ -375,13 +475,20 @@ export default function AiHistory() {
 
       {!error && history === null && <p className="page-subtitle">Loading history…</p>}
 
-      {history && history.length === 0 && (
+      {history && combined.length === 0 && (
         <div className="notice notice-muted">
           No AI analysis yet. Shortlist stocks on the Screener and click "Analyze with AI" to get started.
         </div>
       )}
 
-      {history && history.map((entry) => <HistoryEntry key={entry.id} entry={entry} onDeleted={handleDeleted} />)}
+      {history &&
+        combined.map((item) =>
+          item.kind === "analysis" ? (
+            <HistoryEntry key={`analysis-${item.entry.id}`} entry={item.entry} onDeleted={handleDeleted} />
+          ) : (
+            <ChatSessionEntry key={`chat-${item.entry.id}`} session={item.entry} onDeleted={handleChatDeleted} />
+          )
+        )}
     </section>
   );
 }

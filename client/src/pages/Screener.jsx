@@ -10,6 +10,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { SlidersHorizontal, Play, Bookmark, RefreshCw, Sparkles, X } from "lucide-react";
 import ResultsTable from "../components/ResultsTable";
 import AiComparisonTable from "../components/AiComparisonTable";
+import AiChatBox from "../components/AiChatBox";
 import { useScreener } from "../context/ScreenerContext";
 import { useAuth } from "../context/AuthContext";
 import { saveScreen } from "../api/stocks";
@@ -48,6 +49,13 @@ export default function Screener() {
   const [analysisMode, setAnalysisMode] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState(null);
+  // Snapshotted at analyze time (not read live off `selectedRows`/preferences)
+  // so a follow-up chat (AiChatBox) stays anchored to exactly what produced
+  // this analysis, even if the row selection or saved AI preferences change
+  // while the chat is open.
+  const [analyzedStocks, setAnalyzedStocks] = useState([]);
+  const [analysisPreferences, setAnalysisPreferences] = useState(null);
+  const [analysisId, setAnalysisId] = useState(null);
 
   const selectedRows = useMemo(
     () => (results ?? []).filter((r) => selectedKeys.has(`${r.exchangeCode}-${r.stockCode}`)),
@@ -73,10 +81,17 @@ export default function Screener() {
     setAnalyzeError(null);
     setAnalysis(null);
     setAnalysisMode(null);
+    setAnalysisPreferences(null);
+    setAnalysisId(null);
     try {
-      const { analysis, mode } = await analyzeStocks(selectedRows);
+      const { analysis, mode, preferences } = await analyzeStocks(selectedRows);
       setAnalysis(analysis);
       setAnalysisMode(mode);
+      setAnalyzedStocks(selectedRows);
+      setAnalysisPreferences(preferences ?? {});
+      // Unique per run so AiChatBox's localStorage-backed transcript (see
+      // aiChatStorage.js) starts fresh instead of continuing a past chat.
+      setAnalysisId(`chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     } catch (err) {
       setAnalyzeError(err.message);
     } finally {
@@ -104,6 +119,8 @@ export default function Screener() {
     setAnalysis(null);
     setAnalysisMode(null);
     setAnalyzeError(null);
+    setAnalysisPreferences(null);
+    setAnalysisId(null);
   }, [results]);
 
   async function handleSave(e) {
@@ -326,6 +343,8 @@ export default function Screener() {
                 setAnalysis(null);
                 setAnalysisMode(null);
                 setAnalyzeError(null);
+                setAnalysisPreferences(null);
+                setAnalysisId(null);
               }}
               style={{ padding: "4px 8px" }}
               aria-label="Close AI analysis"
@@ -361,6 +380,17 @@ export default function Screener() {
             >
               {analysis}
             </div>
+          )}
+
+          {analysis && analysisId && (
+            <AiChatBox
+              key={analysisId}
+              sessionId={analysisId}
+              stocks={analyzedStocks}
+              mode={analysisMode}
+              originalAnalysis={analysisMode === "comparison" ? JSON.stringify(analysis) : analysis}
+              preferences={analysisPreferences ?? {}}
+            />
           )}
         </div>
       )}

@@ -14,6 +14,17 @@ export function analyzeStocks(stocks) {
     return api.post("/ai/analyze", { stocks });
 }
 
+// POST /api/ai/chat — ask a follow-up question about a shortlist that was
+// already analyzed. Stateless on the server for now (see ai.controller.js):
+// the client re-sends the full context every time - the stocks/screener
+// metrics, the persona/preferences the original run used, the original
+// analysis text, and the prior turns - and gets back just { reply }. Nothing
+// is persisted server-side yet; see AiChatBox.jsx / aiChatStorage.js for the
+// client-side transcript this backs.
+export function chatAboutStocks({ stocks, mode, originalAnalysis, preferences, history, question }) {
+    return api.post("/ai/chat", { stocks, mode, originalAnalysis, preferences, history, question });
+}
+
 // GET /api/ai/history — the logged-in user's past AI analysis runs
 // (latest first), each with a title, the stocks that were analyzed, the
 // resulting text, and when it was run. Backs the AiHistory page.

@@ -313,3 +313,66 @@ export async function getQualitativeAnalysis(stocks, preferences = {}) {
         ? { mode: "comparison", comparison: parseComparisonResponse(text) }
         : { mode: "single", text: stripMarkdown(text) };
 }
+
+/**
+ * Prompt for a follow-up chat message asked after an analysis/comparison has
+ * already been produced (see AiChatBox.jsx). Unlike the two prompts above,
+ * the conversation itself isn't persisted server-side yet - the client keeps
+ * the running transcript and re-sends the full context (persona/preferences,
+ * shortlisted stocks + screener metrics, the original analysis, and prior
+ * turns) with every question, so this only ever needs to build one prompt
+ * from what it's handed rather than looking anything up.
+ * @param {{
+ *   stocks: Array<{exchangeCode: string, stockCode: string, stockName: string, values?: Record<string, number>}>,
+ *   preferences?: {aiPersona?: string, aiDetailLevel?: string, customInstructions?: string},
+ *   mode: "single" | "comparison",
+ *   originalAnalysis: string,
+ *   history?: Array<{role: "user" | "assistant", content: string}>,
+ *   question: string,
+ * }} context
+ */
+function buildFollowUpPrompt({ stocks, preferences = {}, mode, originalAnalysis, history = [], question }) {
+    const { personaDescription, detailInstruction, customInstructionsBlock } = resolvePreferences(preferences, {
+        concise: "Keep answers brief - 2-4 sentences unless the question genuinely needs more.",
+        detailed: "You can be thorough when it helps, but stay focused on what was asked.",
+    });
+
+    const transcript = history.length
+        ? history.map((m) => `${m.role === "user" ? "Investor" : "You"}: ${m.content}`).join("\n")
+        : "(no follow-up questions yet)";
+
+    return `You are ${personaDescription}, continuing a conversation with a retail investor about a shortlist of stocks you already ${mode === "comparison" ? "compared" : "analyzed"} for them.
+
+Your original ${mode === "comparison" ? "comparison" : "analysis"} (for your own reference, don't just repeat it back):
+${originalAnalysis}
+
+Shortlisted stock${stocks.length > 1 ? "s" : ""}:
+${formatStockList(stocks)}
+
+Conversation so far:
+${transcript}
+
+The investor now asks:
+${question}
+
+${detailInstruction} Answer their question directly, staying consistent with your persona and the original analysis above. Only discuss these shortlisted stocks and investing context directly relevant to them - if asked something unrelated, briefly say you can only help with these stocks. If your answer amounts to investment advice (e.g. "should I buy"), end with a one-line reminder that this isn't financial advice.
+${customInstructionsBlock}
+Respond in plain text only, no markdown or HTML. Do not use asterisks, underscores, backticks, or "#" headers for formatting.`;
+}
+
+/**
+ * @param {Parameters<typeof buildFollowUpPrompt>[0]} context
+ * @returns {Promise<string>}
+ */
+export async function getFollowUpAnswer(context) {
+    const { aiModelTier = "flash" } = context.preferences ?? {};
+    const tier = MODEL_TIERS[aiModelTier] ?? MODEL_TIERS.flash;
+    const prompt = buildFollowUpPrompt(context);
+
+    const text = tier.provider === "gemini" ? await callGemini(prompt) : await callOpenRouter(tier, prompt);
+
+    if (!text) {
+        throw new Error("AI provider returned an empty response");
+    }
+    return stripMarkdown(text);
+}
