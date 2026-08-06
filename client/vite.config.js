@@ -13,7 +13,12 @@ export default defineConfig({
     css: false,
   },
   server: {
-    port: 5173,
+    // 5173 (Vite's default) lives inside a Windows reserved port range on some
+    // machines (Hyper-V/WSL/Docker reserve 5098-5197), making local
+    // `npm run dev` fail with EACCES. Default to 5200 (outside that range) and
+    // allow an override via VITE_PORT. Set VITE_PORT=5173 in Docker, where the
+    // Windows exclusion doesn't apply, to keep the container port mapping.
+    port: Number(process.env.VITE_PORT) || 5200,
     // Allows Docker to override where /api gets proxied to - inside the
     // Docker network "localhost" would mean the client container itself,
     // not the server container, so docker-compose.yml sets this to
