@@ -10,6 +10,21 @@ vi.mock("../../src/api/stocks", () => ({
   getStockPrices: vi.fn(),
 }));
 
+// The report page now also renders star/notes/target features backed by
+// api/personal — stub them so these tests stay focused on the detail view.
+vi.mock("../../src/api/personal", () => ({
+  listStarred: vi.fn().mockResolvedValue([]),
+  addStar: vi.fn(),
+  removeStar: vi.fn(),
+  getTarget: vi.fn().mockResolvedValue(null),
+  setTarget: vi.fn(),
+  deleteTarget: vi.fn(),
+  listNotes: vi.fn().mockResolvedValue([]),
+  createNote: vi.fn(),
+  updateNote: vi.fn(),
+  deleteNote: vi.fn(),
+}));
+
 // Recharts' ResponsiveContainer measures its parent, which has no size in
 // jsdom, so it renders nothing and warns. Swap the chart pieces for simple
 // pass-throughs - we're testing StockDetail's data handling, not Recharts.
