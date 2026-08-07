@@ -9,11 +9,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import AiHistory from "../../src/pages/AiHistory";
 import { getAiHistory, updateAiHistoryEntry, deleteAiHistoryEntry } from "../../src/api/ai";
+import { listChatSessions, deleteChatSession } from "../../src/lib/aiChatStorage";
 
 vi.mock("../../src/api/ai", () => ({
   getAiHistory: vi.fn(),
   updateAiHistoryEntry: vi.fn(),
   deleteAiHistoryEntry: vi.fn(),
+}));
+// Follow-up chat sessions (AiChatBox.jsx) are stored client-side only, not in
+// the DB-backed history the mocked api/ai.js module returns - see
+// aiChatStorage.js. Mocked the same way so these tests control exactly which
+// sessions AiHistory merges in, instead of depending on real localStorage.
+vi.mock("../../src/lib/aiChatStorage", () => ({
+  listChatSessions: vi.fn(),
+  deleteChatSession: vi.fn(),
 }));
 
 const singleEntry = {
@@ -51,9 +60,23 @@ const comparisonEntry = {
   createdAt: "2026-07-03T09:00:00.000Z",
 };
 
+const chatSession = {
+  id: "chat-1",
+  updatedAt: "2026-07-04T09:00:00.000Z",
+  stocks: [{ exchangeCode: "SGX", stockCode: "D05", stockName: "DBS Group Holdings" }],
+  mode: "single",
+  originalAnalysis: "DBS Group Holdings: solid pick.",
+  preferences: { aiPersona: "growth" },
+  messages: [
+    { role: "user", content: "What are the biggest risks here?" },
+    { role: "assistant", content: "Rate sensitivity is the main one." },
+  ],
+};
+
 describe("AiHistory", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    listChatSessions.mockReturnValue([]);
   });
 
   it("shows a loading message before history arrives", () => {
@@ -161,5 +184,65 @@ describe("AiHistory", () => {
 
     expect(deleteAiHistoryEntry).not.toHaveBeenCalled();
     expect(screen.getByText("D05")).toBeInTheDocument();
+  });
+
+  it("merges a client-side-only follow-up chat session in among the DB-backed runs", async () => {
+    getAiHistory.mockResolvedValue({ history: [singleEntry] });
+    listChatSessions.mockReturnValue([chatSession]);
+    render(<AiHistory />);
+
+    expect(await screen.findByText("Follow-up chat · this browser only")).toBeInTheDocument();
+    expect(screen.getByText("growth persona")).toBeInTheDocument();
+    expect(screen.getByText("What are the biggest risks here?")).toBeInTheDocument();
+    expect(screen.getByText("Rate sensitivity is the main one.")).toBeInTheDocument();
+    // The run it followed up on is still shown too - they're merged, not
+    // one replacing the other.
+    expect(screen.getByText("D05")).toBeInTheDocument();
+  });
+
+  it("renders a comparison-mode chat session's original analysis via AiComparisonTable", async () => {
+    getAiHistory.mockResolvedValue({ history: [] });
+    listChatSessions.mockReturnValue([
+      {
+        ...chatSession,
+        mode: "comparison",
+        originalAnalysis: JSON.stringify({
+          stocks: ["DBS Group Holdings", "OCBC Bank"],
+          criteria: [{ name: "Growth outlook", notes: ["Steady growth.", "Modest growth."], winner: "DBS Group Holdings" }],
+          summary: "DBS wins on growth.",
+          disclaimer: "This is not financial advice.",
+        }),
+      },
+    ]);
+    render(<AiHistory />);
+
+    fireEvent.click(await screen.findByText("Original analysis"));
+
+    expect(await screen.findByText("Growth outlook")).toBeInTheDocument();
+    expect(screen.getByText("DBS wins on growth.")).toBeInTheDocument();
+  });
+
+  it("deletes a follow-up chat session after confirmation, removing it from the list", async () => {
+    getAiHistory.mockResolvedValue({ history: [] });
+    listChatSessions.mockReturnValue([chatSession]);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<AiHistory />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /delete conversation/i }));
+
+    expect(deleteChatSession).toHaveBeenCalledWith("chat-1");
+    expect(screen.queryByText("Follow-up chat · this browser only")).not.toBeInTheDocument();
+  });
+
+  it("keeps a follow-up chat session when the user cancels the delete confirmation", async () => {
+    getAiHistory.mockResolvedValue({ history: [] });
+    listChatSessions.mockReturnValue([chatSession]);
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<AiHistory />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /delete conversation/i }));
+
+    expect(deleteChatSession).not.toHaveBeenCalled();
+    expect(screen.getByText("Follow-up chat · this browser only")).toBeInTheDocument();
   });
 });

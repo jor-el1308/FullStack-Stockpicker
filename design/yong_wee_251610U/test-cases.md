@@ -4,11 +4,11 @@
 
 Backend and frontend unit tests for three features:
 
-- **AI qualitative analysis:** `ai.service.js` (prompt building + Gemini/OpenRouter calls), `aiHistory.service.js` / `aiPreferences.service.js` (persistence), `ai.controller.js` / `aiPreferences.controller.js` (validation + HTTP mapping), and the React side (`AiComparisonTable`, `AiHistory`, the "Analyze with AI" flow on `Screener`, and the `api/ai.js` / `api/aiPreferences.js` clients).
+- **AI qualitative analysis:** `ai.service.js` (prompt building + Gemini/OpenRouter calls for both the initial analysis and follow-up chat replies), `aiHistory.service.js` / `aiPreferences.service.js` (persistence), `ai.controller.js` / `aiPreferences.controller.js` (validation + HTTP mapping), `aiChatStorage.js` (the `localStorage`-backed follow-up chat session store), and the React side (`AiComparisonTable`, `AiHistory` including its client-side-only `ChatSessionEntry` cards, the "Analyze with AI" flow on `Screener`, `AiChatBox` - the follow-up chat widget, and the `api/ai.js` / `api/aiPreferences.js` clients).
 - **"Sign in with Google":** `googleOAuth.service.js` (Google URL building, state generation, code-for-profile exchange), `auth.service.js`'s `findOrCreateGoogleUser`/`findUserByGoogleId` (account matching/linking/creation), `auth.controller.js`'s `googleOAuthStart`/`googleOAuthCallback` (the CSRF state cookie round trip, error redirects, session cookie issuance), and the React side (the Google button + the `?oauth=success|error` redirect handling on `Login.jsx`).
 - **"Sign in with Microsoft":** a file-for-file mirror of the Google suite above — `microsoftOAuth.service.js` (Microsoft identity platform URL building against the configured tenant, state generation, code-for-profile exchange via Microsoft Graph), `auth.service.js`'s `findOrCreateMicrosoftUser`/`findUserByMicrosoftId`, `auth.controller.js`'s `microsoftOAuthStart`/`microsoftOAuthCallback`, and the Microsoft button + shared `?oauth=success|error` handling on `Login.jsx`.
 
-**All 122 tests pass** (85 backend + 37 frontend), of which 21 backend + 3 frontend are new for Microsoft OAuth (on top of the 20 backend + 6 frontend that were new for Google OAuth). (These counts are scoped to this owner's test files, `server/tests/yong_wee_251610U/` and `client/tests/yong_wee_251610U/` — running `npm test` in `client/` also runs other owners' tests alongside these.)
+**All 153 tests pass** (95 backend + 58 frontend), of which 10 backend + 21 frontend are new for the AI follow-up chat extension (`POST /api/ai/chat`, `AiChatBox.jsx`, `aiChatStorage.js`) — on top of the 21 backend + 3 frontend that were new for Microsoft OAuth, and the 20 backend + 6 frontend that were new for Google OAuth before that. `ScreenerAiAnalysis.test.jsx` is also updated in this pass (not new coverage, a fix) — 5 of its 6 cases had been broken by an unrelated, earlier Screener "Analyze with AI" button redesign (a floating action button, found by `aria-label`, replaced the old labelled button the tests queried by visible text) that predates the chat extension; see its section below for what changed. (These counts are scoped to this owner's test files, `server/tests/yong_wee_251610U/` and `client/tests/yong_wee_251610U/` — running `npm test` in `client/` also runs other owners' tests alongside these.)
 
 ## How to run
 
@@ -33,9 +33,9 @@ Or from the repo root: `npm test --workspace=server` / `npm test --workspace=cli
 
 ## Backend tests
 
-### `ai.service.js` (`ai.service.test.js`) — 11 cases
+### `ai.service.js` (`ai.service.test.js`) — 16 cases
 
-The core "send shortlisted stocks to an LLM" logic. `global.fetch` is stubbed so no real provider is called.
+The core "send shortlisted stocks to an LLM" logic, covering both `getQualitativeAnalysis` (cases 1-11) and the follow-up chat prompt builder `getFollowUpAnswer` (cases 12-16, new for the chat extension). `global.fetch` is stubbed so no real provider is called.
 
 | # | Test | What it checks | Expected outcome |
 |---|---|---|---|
@@ -50,6 +50,11 @@ The core "send shortlisted stocks to an LLM" logic. `global.fetch` is stubbed so
 | 9 | empty model response | Provider returns no candidates/text | Rejects with `/empty response/` |
 | 10 | OpenRouter routing | A non-`flash` tier (`gpt-4o-mini`) routes through OpenRouter with a bearer token | URL contains `openrouter.ai`; `Authorization: Bearer test-openrouter-key` |
 | 11 | missing OpenRouter key | `OPENROUTER_API_KEY` unset for a non-flash tier | Rejects with `/OPENROUTER_API_KEY is not set/` |
+| 12 | follow-up reply, markdown stripped | `getFollowUpAnswer` happy path | Returns the model's text with markdown tokens stripped, same as the single-stock write-up |
+| 13 | prompt includes original analysis, persona, and prior turns | Persona/custom instructions + a two-turn `history` passed in | Prompt sent to the model contains the persona description, the `originalAnalysis` text, every prior turn, and the new `question` |
+| 14 | missing Gemini key | `AI_RECOMMENDATION_API_KEY` unset for the default tier | Rejects with `/AI_RECOMMENDATION_API_KEY is not set/`; `fetch` never called |
+| 15 | empty model response | Provider returns no candidates/text | Rejects with `/empty response/` |
+| 16 | OpenRouter routing | A non-`flash` tier routes through OpenRouter with a bearer token | URL contains `openrouter.ai`; `Authorization: Bearer test-openrouter-key` |
 
 ### `aiHistory.service.js` (`aiHistory.service.test.js`) — 9 cases
 
@@ -79,25 +84,30 @@ Per-user settings (`ai_preferences` table, one row per user). `pool` is mocked.
 | 4 | merge-then-upsert | `updateAiPreferences` merges a partial patch onto the current row before upserting | Only the patched field changes; `ON DUPLICATE KEY UPDATE` SQL used with the full merged param list |
 | 5 | empty custom instructions stored as NULL | Patching `customInstructions: ""` | Upsert param is `null`, not `""` |
 
-### `ai.controller.js` (`ai.controller.test.js`) — 13 cases
+### `ai.controller.js` (`ai.controller.test.js`) — 18 cases
 
-Request validation, the single-vs-comparison response shape, best-effort history persistence, and 400/404/500 error mapping. The service layer is mocked.
+Request validation, the single-vs-comparison response shape, best-effort history persistence, the follow-up chat endpoint (cases 7-11, new for the chat extension), and 400/404/500 error mapping. The service layer is mocked.
 
 | # | Test | What it checks | Expected outcome |
 |---|---|---|---|
 | 1 | empty `stocks` array | `POST /analyze` validation | `400`; AI service never called |
 | 2 | >10 stocks | `POST /analyze` validation | `400`; AI service never called |
-| 3 | single-stock success | Happy path | `200` with `{analysis, mode:"single"}`; history saved with the raw text |
-| 4 | comparison success | Happy path | `200` with `analysis` as an **object**; history saved as its **JSON string** |
+| 3 | single-stock success | Happy path | `200` with `{analysis, mode:"single", preferences}` (the AI preferences this run used, echoed for the follow-up chat's context - see UC-08); history saved with the raw text |
+| 4 | comparison success | Happy path | `200` with `analysis` as an **object** plus `preferences`; history saved as its **JSON string** |
 | 5 | best-effort persistence | History save fails after a successful model call | Still returns `200` with the analysis (failure only logged) |
 | 6 | AI provider failure | `getQualitativeAnalysis` rejects | `500` with a message naming the required API key |
-| 7 | get history success | `GET /history` happy path | `200` with `{history}` |
-| 8 | get history failure | Service throws | `500` |
-| 9 | update with neither field | `PATCH /history/:id` validation | `400`; service never called |
-| 10 | update not found | Service throws `AiAnalysisNotFoundError` | `404` |
-| 11 | update success | Happy path | `200` with the updated entry; service called with `(userId, id, patch)` |
-| 12 | delete success | Happy path | `200` with `{id}` |
-| 13 | delete not found | Service throws `AiAnalysisNotFoundError` | `404` |
+| 7 | chat: missing original analysis | `POST /chat` validation | `400`; `getFollowUpAnswer` never called |
+| 8 | chat: empty question | `POST /chat` validation | `400`; `getFollowUpAnswer` never called |
+| 9 | chat: invalid `mode` | `mode` outside `single`/`comparison` | `400`; `getFollowUpAnswer` never called |
+| 10 | chat: happy path | Valid full-context request | `200` with `{reply}`; `getFollowUpAnswer` called with the forwarded stocks/mode/originalAnalysis/question |
+| 11 | chat: AI provider failure | `getFollowUpAnswer` rejects | `500` with a message naming the required API key |
+| 12 | get history success | `GET /history` happy path | `200` with `{history}` |
+| 13 | get history failure | Service throws | `500` |
+| 14 | update with neither field | `PATCH /history/:id` validation | `400`; service never called |
+| 15 | update not found | Service throws `AiAnalysisNotFoundError` | `404` |
+| 16 | update success | Happy path | `200` with the updated entry; service called with `(userId, id, patch)` |
+| 17 | delete success | Happy path | `200` with `{id}` |
+| 18 | delete not found | Service throws `AiAnalysisNotFoundError` | `404` |
 
 ### `aiPreferences.controller.js` (`aiPreferences.controller.test.js`) — 6 cases
 
@@ -210,9 +220,9 @@ Building the Microsoft consent URL (against the configured tenant), generating t
 | 5 | missing note fallback | A stock has no note for a criterion (`notes[j]` undefined) | Renders `"—"` |
 | 6 | empty state | No stocks or no criteria | Renders nothing (`null`) |
 
-### `AiHistory` (`AiHistory.test.jsx`) — 10 cases
+### `AiHistory` (`AiHistory.test.jsx`) — 14 cases
 
-The API layer (`api/ai.js`) is mocked; no server or database is needed.
+The API layer (`api/ai.js`) and the client-side chat session store (`aiChatStorage.js`) are both mocked; no server, database, or real `localStorage` state is needed. Cases 11-14 (new for the chat extension) cover `ChatSessionEntry` - the read-only card for a client-side-only follow-up conversation, merged chronologically alongside the DB-backed cards above.
 
 | # | Test | What it checks | Expected outcome |
 |---|---|---|---|
@@ -226,32 +236,69 @@ The API layer (`api/ai.js`) is mocked; no server or database is needed.
 | 8 | edit write-up | Click Edit → change textarea → Save changes | `updateAiHistoryEntry(id, {analysisText})` called; new text shown |
 | 9 | delete confirmed | Delete button, `window.confirm` mocked `true` | `deleteAiHistoryEntry(id)` called; entry removed from the list |
 | 10 | delete cancelled | `window.confirm` mocked `false` | API never called; entry stays in the list |
+| 11 | chat session merged in | `listChatSessions()` returns one session alongside a DB-backed entry | "Follow-up chat · this browser only" label, persona chip, and both message bubbles render; the DB-backed run it followed up on still shows too |
+| 12 | comparison-mode chat session | A chat session whose `originalAnalysis` is a JSON comparison string | The "Original analysis" `<details>` renders via `AiComparisonTable`, same detection as case 5 |
+| 13 | delete chat session confirmed | Delete button, `window.confirm` mocked `true` | `deleteChatSession(id)` called; session removed from the list |
+| 14 | delete chat session cancelled | `window.confirm` mocked `false` | `deleteChatSession` never called; session stays in the list |
 
 ### Screener — "Analyze with AI" (`ScreenerAiAnalysis.test.jsx`) — 6 cases
 
-Isolates Person 1's AI-analysis logic embedded in `Screener.jsx` (owned by Person 3) by mocking `useScreener`/`useAuth` and the `analyzeStocks` API call, so only the shortlist/analyze/render behavior is exercised.
+Isolates Person 1's AI-analysis logic embedded in `Screener.jsx` (owned by Person 3) by mocking `useScreener`/`useAuth` and the `analyzeStocks`/`getAiPreferences` API calls, so only the shortlist/analyze/render behavior is exercised. **Updated in this pass** (a fix, not new coverage) to match an earlier, unrelated Screener redesign: the "Analyze with AI" trigger is now a floating action button (`.ai-fab`, bottom-right of the viewport) with no visible label - just a sparkles icon and a count badge - so these tests find it by its `aria-label` instead of visible button text. The label itself is dynamic, encoding both the shortlist count and the active AI model tier (`GET /api/ai/preferences`, now mocked here too): `"Analyze with AI, using <model> (select rows in the results table first)"` when nothing is shortlisted, or `"Analyze <N> selected stock(s) with AI, using <model>"` once rows are ticked.
 
 | # | Test | What it checks | Expected outcome |
 |---|---|---|---|
-| 1 | disabled by default | No rows shortlisted | "Analyze with AI" button disabled |
-| 2 | shortlist a row | Ticking one row's checkbox | Button enabled, labeled "Analyze with AI (1)" |
-| 3 | **10-stock cap (regression)** | Ticking 11 rows | Shortlist stays capped at 10; button reads "(10)" |
+| 1 | disabled by default | No rows shortlisted | Fab button disabled, `aria-label` starting "Analyze with AI, using …" |
+| 2 | shortlist a row | Ticking one row's checkbox | Fab enabled, `aria-label` "Analyze 1 selected stock with AI, using …"; count badge reads "1" |
+| 3 | **10-stock cap (regression)** | Ticking 11 rows | Shortlist stays capped at 10; `aria-label` "Analyze 10 selected stocks with AI, using …" |
 | 4 | single-stock result | Analyzing exactly one stock | Free-text write-up rendered; `analyzeStocks` called with the one selected row |
 | 5 | comparison result | Analyzing two stocks | `AiComparisonTable` rendered (criterion name + summary visible) |
 | 6 | error state | `analyzeStocks` rejects | "Couldn't get AI analysis: …" shown with the preserved message |
 
-### API clients (`aiApiClient.test.js`) — 6 cases
+Cases 1-3 use `findByRole` (not `getByRole`) for the fab button, awaiting the mocked `GET /api/ai/preferences` fetch the fab's label depends on so its resolution doesn't leak a state update outside of React Testing Library's `act()` wrapper after the test's assertion returns.
 
-Verifies `client/src/api/ai.js` and `client/src/api/aiPreferences.js` hit the exact method/path documented in `api-documentation.md`. `global.fetch` is stubbed.
+### `AiChatBox` (`AiChatBox.test.jsx`) — 7 cases, new for the chat extension
+
+The follow-up chat widget shown under a completed run (`client/src/components/AiChatBox.jsx`, see UC-08). `api/ai.js`'s `chatAboutStocks` and `aiChatStorage.js`'s `loadChatSession`/`saveChatSession` are both mocked. jsdom doesn't implement `Element.prototype.scrollIntoView` (used to keep the latest bubble in view), so it's stubbed per-test - unrelated to what these tests verify.
+
+| # | Test | What it checks | Expected outcome |
+|---|---|---|---|
+| 1 | suggested prompts | No prior session (`loadChatSession` returns `null`) | The three suggested-prompt chips render; no message thread |
+| 2 | loads an existing session | `loadChatSession` returns a session with messages | Those messages render instead of the suggested prompts |
+| 3 | suggested prompt click | Clicking a chip | Sends it as the question; both the user and assistant bubbles render on success |
+| 4 | typed question, sending state | Type + submit, reply promise not yet resolved | Input clears and disables; "Thinking…" bubble shown; input re-enables once the reply resolves |
+| 5 | session persisted on success | A successful reply | `saveChatSession` called with the session id and the full updated `messages` array |
+| 6 | **error rollback** | `chatAboutStocks` rejects | "Couldn't send that: …" shown; the optimistic user bubble is removed from the thread; the typed text is restored into the input; `saveChatSession` never called |
+| 7 | empty/whitespace question | Input is blank/spaces only | Send button disabled; submitting the form does not call `chatAboutStocks` |
+
+### `aiChatStorage` (`aiChatStorage.test.js`) — 9 cases, new for the chat extension
+
+The `localStorage`-backed persistence for follow-up chat sessions (`client/src/lib/aiChatStorage.js`). Runs against jsdom's real `localStorage`, cleared before each test.
+
+| # | Test | What it checks | Expected outcome |
+|---|---|---|---|
+| 1 | missing session | `loadChatSession` with an id never saved | Returns `null` |
+| 2 | no id given | `loadChatSession(undefined)` | Returns `null` without touching storage |
+| 3 | round trip | `saveChatSession` then `loadChatSession` | Returns the exact session object saved |
+| 4 | upsert by id | `saveChatSession` called twice with the same `id` | `listChatSessions()` still has length 1; the second save's data wins |
+| 5 | latest-first ordering | Three sessions saved with different `updatedAt` | `listChatSessions()` returns them newest-`updatedAt`-first |
+| 6 | delete | `deleteChatSession` on one of two saved sessions | The deleted id is gone; the other session is untouched |
+| 7 | 50-session cap | 55 sessions saved in sequence | `listChatSessions()` has length 50; the earliest-saved sessions are the ones dropped |
+| 8 | corrupt JSON in storage | `localStorage` holds a malformed JSON string | `listChatSessions()` falls back to `[]` instead of throwing |
+| 9 | non-array JSON in storage | `localStorage` holds valid JSON that isn't an array | `listChatSessions()` falls back to `[]` |
+
+### API clients (`aiApiClient.test.js`) — 7 cases
+
+Verifies `client/src/api/ai.js` and `client/src/api/aiPreferences.js` hit the exact method/path documented in `api-documentation.md`. `global.fetch` is stubbed. Case 2 (new for the chat extension) covers `chatAboutStocks`.
 
 | # | Test | What it checks | Expected outcome |
 |---|---|---|---|
 | 1 | `analyzeStocks` | Request shape | `POST /api/ai/analyze` with body `{stocks}` |
-| 2 | `getAiHistory` | Request shape | `GET /api/ai/history` |
-| 3 | `updateAiHistoryEntry` | Request shape | `PATCH /api/ai/history/:id` with only the changed fields |
-| 4 | `deleteAiHistoryEntry` | Request shape | `DELETE /api/ai/history/:id` |
-| 5 | `getAiPreferences` | Request shape | `GET /api/ai/preferences` |
-| 6 | `updateAiPreferences` | Request shape | `PATCH /api/ai/preferences` with only the changed fields |
+| 2 | `chatAboutStocks` | Request shape | `POST /api/ai/chat` with body `{stocks, mode, originalAnalysis, preferences, history, question}` |
+| 3 | `getAiHistory` | Request shape | `GET /api/ai/history` |
+| 4 | `updateAiHistoryEntry` | Request shape | `PATCH /api/ai/history/:id` with only the changed fields |
+| 5 | `deleteAiHistoryEntry` | Request shape | `DELETE /api/ai/history/:id` |
+| 6 | `getAiPreferences` | Request shape | `GET /api/ai/preferences` |
+| 7 | `updateAiPreferences` | Request shape | `PATCH /api/ai/preferences` with only the changed fields |
 
 ### Login — Google OAuth (`LoginGoogleOAuth.test.jsx`) — 6 cases
 
@@ -286,3 +333,7 @@ Covers the Microsoft-specific pieces of `Login.jsx`: the button itself, and conf
 - **`LoginGoogleOAuth.test.jsx` renders `Login` inside a `MemoryRouter` with sibling `/`/`/activate` routes** (rather than just `Login` alone) specifically so the post-redirect `navigate()` calls are observable as "which page rendered", not just "was `navigate` called with the right string" - closer to what a user actually sees. `LoginMicrosoftOAuth.test.jsx` reuses the same `renderLogin` helper shape.
 - **The Microsoft OAuth test files (`microsoftOAuth.service.test.js`, `microsoftOAuthUser.service.test.js`, `microsoftOAuth.controller.test.js`, `LoginMicrosoftOAuth.test.jsx`) deliberately mirror their Google counterparts case-for-case** (with a couple of Microsoft-only additions - tenant selection in the auth-URL test, the `mail`/`userPrincipalName` fallback) rather than being written independently, since the implementation itself is a case-for-case mirror of the Google flow (`microsoftOAuth.service.js`/`microsoftOAuthStart`/`microsoftOAuthCallback`/`findOrCreateMicrosoftUser` next to their Google equivalents). The frontend suite is the one exception - see its note above for why it's smaller.
 - Interactions use `fireEvent` (not `@testing-library/user-event`, which isn't a project dependency) to match the existing convention in `client/tests/enrico_javier_wijaya_250504Z/`.
+- **`aiChatStorage.test.js` runs against jsdom's real `localStorage`** (cleared in `beforeEach`) rather than mocking it, since the module *is* the localStorage wrapper being tested - there's nothing left to verify if the storage layer itself is stubbed out. Every other test file that touches `aiChatStorage.js` indirectly (`AiChatBox.test.jsx`, `AiHistory.test.jsx`) mocks the module instead, so those stay focused on their own component's behavior.
+- **`AiChatBox.test.jsx` stubs `Element.prototype.scrollIntoView`** (`vi.fn()` in `beforeEach`) since jsdom doesn't implement it and the component calls it on every message-list update purely to keep the latest bubble in view - unrelated to what the tests verify, but left unstubbed it throws and fails every test that sends a message.
+- **`analyzeStocks`'s response now includes an echoed `preferences` field** (added alongside the chat extension - see UC-08/api-documentation.md), which is why the 3 pre-existing `ai.controller.test.js` cases asserting the full response shape needed updating in this pass, not just the new chat cases.
+- **`ScreenerAiAnalysis.test.jsx` now mocks `api/aiPreferences.js`** alongside `api/ai.js`, since the fab button's `aria-label`/tooltip reads the caller's saved AI preferences (`GET /api/ai/preferences`) on mount - unmocked, the real module would attempt a real `fetch` in jsdom instead of resolving deterministically.

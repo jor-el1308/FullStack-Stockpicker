@@ -10,10 +10,13 @@ import { Link, useNavigate } from "react-router-dom";
 import { SlidersHorizontal, Play, Bookmark, RefreshCw, Sparkles, X } from "lucide-react";
 import ResultsTable from "../components/ResultsTable";
 import AiComparisonTable from "../components/AiComparisonTable";
+import AiChatBox from "../components/AiChatBox";
 import { useScreener } from "../context/ScreenerContext";
 import { useAuth } from "../context/AuthContext";
 import { saveScreen } from "../api/stocks";
 import { analyzeStocks } from "../api/ai";
+import { getAiPreferences } from "../api/aiPreferences";
+import { AI_MODEL_OPTIONS, AI_PERSONA_OPTIONS, AI_DETAIL_OPTIONS } from "../constants/aiPreferences";
 import { describeRange } from "../screener/criteria";
 
 const MAX_AI_SELECTION = 10;
@@ -48,6 +51,25 @@ export default function Screener() {
   const [analysisMode, setAnalysisMode] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState(null);
+  // Snapshotted at analyze time (not read live off `selectedRows`/preferences)
+  // so a follow-up chat (AiChatBox) stays anchored to exactly what produced
+  // this analysis, even if the row selection or saved AI preferences change
+  // while the chat is open.
+  const [analyzedStocks, setAnalyzedStocks] = useState([]);
+  const [analysisPreferences, setAnalysisPreferences] = useState(null);
+  const [analysisId, setAnalysisId] = useState(null);
+
+  // The user's saved AI preferences (model tier, persona, detail level,
+  // custom instructions) - fetched once so the floating "Analyze with AI"
+  // button can show the active model and surface the rest as a tooltip,
+  // without waiting for an analysis run.
+  const [aiPrefs, setAiPrefs] = useState(null);
+  useEffect(() => {
+    if (!user) return;
+    getAiPreferences()
+      .then(setAiPrefs)
+      .catch(() => {});
+  }, [user]);
 
   const selectedRows = useMemo(
     () => (results ?? []).filter((r) => selectedKeys.has(`${r.exchangeCode}-${r.stockCode}`)),
@@ -73,10 +95,17 @@ export default function Screener() {
     setAnalyzeError(null);
     setAnalysis(null);
     setAnalysisMode(null);
+    setAnalysisPreferences(null);
+    setAnalysisId(null);
     try {
-      const { analysis, mode } = await analyzeStocks(selectedRows);
+      const { analysis, mode, preferences } = await analyzeStocks(selectedRows);
       setAnalysis(analysis);
       setAnalysisMode(mode);
+      setAnalyzedStocks(selectedRows);
+      setAnalysisPreferences(preferences ?? {});
+      // Unique per run so AiChatBox's localStorage-backed transcript (see
+      // aiChatStorage.js) starts fresh instead of continuing a past chat.
+      setAnalysisId(`chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     } catch (err) {
       setAnalyzeError(err.message);
     } finally {
@@ -104,6 +133,8 @@ export default function Screener() {
     setAnalysis(null);
     setAnalysisMode(null);
     setAnalyzeError(null);
+    setAnalysisPreferences(null);
+    setAnalysisId(null);
   }, [results]);
 
   async function handleSave(e) {
@@ -143,6 +174,27 @@ export default function Screener() {
     setSaveOpen(false);
   }
 
+  // Labels for the floating AI button: the active model is shown on the
+  // button itself, the rest of the preferences (persona, detail level,
+  // custom instructions) surface as a hover tooltip.
+  const aiModelLabel =
+    AI_MODEL_OPTIONS.find((m) => m.id === (aiPrefs?.aiModelTier ?? AI_MODEL_OPTIONS[0].id))?.label ??
+    AI_MODEL_OPTIONS[0].label;
+  const aiPersonaLabel =
+    AI_PERSONA_OPTIONS.find((p) => p.id === (aiPrefs?.aiPersona ?? AI_PERSONA_OPTIONS[0].id))?.label ??
+    AI_PERSONA_OPTIONS[0].label;
+  const aiDetailLabel =
+    AI_DETAIL_OPTIONS.find((d) => d.id === (aiPrefs?.aiDetailLevel ?? AI_DETAIL_OPTIONS[0].id))?.label ??
+    AI_DETAIL_OPTIONS[0].label;
+  const aiFabTooltipRows = [
+    { label: "Persona", value: aiPersonaLabel },
+    { label: "Detail level", value: aiDetailLabel },
+    ...(aiPrefs?.customInstructions
+      ? [{ label: "Custom instructions", value: aiPrefs.customInstructions }]
+      : []),
+  ];
+  const showAnalysisPanel = analyzing || analysis || analyzeError;
+
   return (
     <section>
       <div className="page-head">
@@ -168,15 +220,6 @@ export default function Screener() {
           <button className="btn btn-primary" onClick={() => runScreen()} disabled={loading || !criteriaReady}>
             <Play size={14} />
             {loading ? "Running…" : "Run Screen"}
-          </button>
-          <button
-            className="btn btn-secondary"
-            onClick={handleAnalyze}
-            disabled={selectedRows.length === 0 || analyzing}
-            title={selectedRows.length === 0 ? "Select rows in the results table first" : undefined}
-          >
-            <Sparkles size={14} />
-            {analyzing ? "Analyzing…" : `Analyze with AI${selectedRows.length ? ` (${selectedRows.length})` : ""}`}
           </button>
         </div>
       </div>
@@ -275,8 +318,9 @@ export default function Screener() {
         </div>
         {results && results.length > 0 && (
           <p className="page-subtitle" style={{ padding: "10px 16px 0" }}>
-            Tick rows to shortlist up to {MAX_AI_SELECTION} stocks, then click "Analyze with AI" above for a
-            qualitative take on a single stock, or a structured comparison when you select more than one.
+            Tick rows to shortlist up to {MAX_AI_SELECTION} stocks, then use the AI button in the bottom-right
+            corner for a qualitative take on a single stock, or a structured comparison when you select more
+            than one.
           </p>
         )}
         <div style={{ overflowX: "auto", padding: "0 8px 8px" }}>
@@ -301,7 +345,7 @@ export default function Screener() {
         </div>
       </div>
 
-      {(analyzing || analysis || analyzeError) && (
+      {showAnalysisPanel && (
         <div
           className={`card card-pad${analyzing ? " ai-analysis-floating" : ""}`}
           style={analyzing ? undefined : { marginTop: 16 }}
@@ -326,6 +370,8 @@ export default function Screener() {
                 setAnalysis(null);
                 setAnalysisMode(null);
                 setAnalyzeError(null);
+                setAnalysisPreferences(null);
+                setAnalysisId(null);
               }}
               style={{ padding: "4px 8px" }}
               aria-label="Close AI analysis"
@@ -362,6 +408,61 @@ export default function Screener() {
               {analysis}
             </div>
           )}
+
+          {analysis && analysisId && (
+            <AiChatBox
+              key={analysisId}
+              sessionId={analysisId}
+              stocks={analyzedStocks}
+              mode={analysisMode}
+              originalAnalysis={analysisMode === "comparison" ? JSON.stringify(analysis) : analysis}
+              preferences={analysisPreferences ?? {}}
+            />
+          )}
+        </div>
+      )}
+
+      {/* Floating "Analyze with AI" launcher, chatbot-widget style: a small
+          circular button pinned to the bottom-right of the viewport rather
+          than competing with the other page actions above. It steps aside
+          while the analysis panel is open (like a chat bubble that hides
+          behind its own open panel) and reappears once it's closed. */}
+      {!showAnalysisPanel && (
+        <div className="ai-fab-wrap">
+          {/* Custom hover card (CSS-only, shown via .ai-fab-wrap:hover/:focus-within)
+              instead of a plain native title tooltip, so the rest of the AI
+              preferences read as a small styled card rather than a browser tooltip. */}
+          <div className="ai-fab-tooltip" aria-hidden="true">
+            <div className="ai-fab-tooltip-title">
+              <Sparkles size={12} />
+              AI preferences
+            </div>
+            <dl className="ai-fab-tooltip-list">
+              {aiFabTooltipRows.map((row) => (
+                <div className="ai-fab-tooltip-row" key={row.label}>
+                  <dt>{row.label}</dt>
+                  <dd>{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+            {selectedRows.length === 0 && (
+              <div className="ai-fab-tooltip-hint">Select rows in the results table first</div>
+            )}
+          </div>
+          <button
+            className="ai-fab"
+            onClick={handleAnalyze}
+            disabled={selectedRows.length === 0 || analyzing}
+            aria-label={
+              selectedRows.length === 0
+                ? `Analyze with AI, using ${aiModelLabel} (select rows in the results table first)`
+                : `Analyze ${selectedRows.length} selected stock${selectedRows.length === 1 ? "" : "s"} with AI, using ${aiModelLabel}`
+            }
+          >
+            <Sparkles size={22} />
+            {selectedRows.length > 0 && <span className="ai-fab-count">{selectedRows.length}</span>}
+          </button>
+          <span className="ai-fab-badge">{aiModelLabel}</span>
         </div>
       )}
     </section>

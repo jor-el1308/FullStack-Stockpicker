@@ -11,6 +11,8 @@ Three features' worth of schema. The two tables that back the AI analysis featur
 | `ai_analysis` | One row per "Analyze with AI" run — the shortlisted stocks sent to the model, the resulting write-up/comparison, and a renameable title. |
 | `ai_preferences` | One row per user — their saved model tier / persona / detail level / custom instructions for future analysis runs. |
 
+Follow-up chat conversations (`POST /api/ai/chat`, see `AiChatBox.jsx`) are **not** backed by a table - see "Not persisted to the database" below.
+
 ---
 
 ### `ai_analysis` — saved AI analysis runs
@@ -47,6 +49,28 @@ Backs the "AI preferences" tab in Settings. Read by `ai.controller.js` before ev
 - **Primary key:** `user_id` (also the FK — enforces exactly one preferences row per user).
 - **Foreign key:** `user_id` → `users(id)` `ON DELETE CASCADE`.
 - **Upsert pattern:** `updateAiPreferences()` uses `INSERT ... ON DUPLICATE KEY UPDATE` on `user_id`, so the first `PATCH` implicitly creates the row — there is no separate "create preferences" step.
+
+---
+
+### Not persisted to the database — follow-up chat conversations
+
+The follow-up chat widget shown under a completed run (`client/src/components/AiChatBox.jsx`, `POST /api/ai/chat`) deliberately has **no backing table**. `POST /api/ai/chat` is stateless server-side (see API doc) - nothing about a conversation is ever written to MySQL. Instead, the running transcript is mirrored into the browser's `localStorage` by `client/src/lib/aiChatStorage.js`, one JSON array (key `aiChatSessions`, capped at the 50 most-recently-updated sessions) of objects shaped like:
+
+```
+{
+  id: string,               // same id ai.controller.js's saveAiAnalysis generated for the run this follows up on
+  updatedAt: string,        // ISO timestamp, drives latest-first ordering (mirrors ai_analysis.created_at's role)
+  stocks: [...],            // snapshot of the shortlist, same shape as ai_analysis.stocks
+  mode: "single" | "comparison",
+  originalAnalysis: string, // snapshot of the run's analysis_text at the time the chat started
+  preferences: {...},       // snapshot of the persona/model tier/etc this run used
+  messages: [{ role: "user" | "assistant", content: string }, ...],
+}
+```
+
+- **Why client-side only, unlike `ai_analysis`/`ai_preferences` above:** this is a prototype of "follow-up conversations show up in history" (see `AiHistory.jsx`'s `ChatSessionEntry`) shipped ahead of committing to a schema/migration for persisted conversations - trying the UX out before deciding whether a conversation deserves its own table (most likely `ai_chat_message(id, ai_analysis_id, role, content, created_at)`, FK'd to `ai_analysis(id)`) or a `messages` JSON column bolted onto `ai_analysis` itself.
+- **Consequence:** conversations don't sync across devices/browsers, are lost if the user clears site data, and aren't included in any account-deletion cleanup (`ai_analysis`/`ai_preferences` cascade via `ON DELETE CASCADE`; this doesn't need to, since it was never written to a row tied to `user_id` in the first place). The AI Analysis History page labels these cards "Follow-up chat · this browser only" so this isn't presented as equivalent to the DB-backed history above it.
+- **`id` deliberately reuses the originating run's id** (generated client-side at analysis time, see `Screener.jsx`) rather than a fresh UUID, so a session upsert (`saveChatSession`) is naturally scoped to "the conversation that followed up on this specific run" - re-running the analysis on the same page produces a new run id and therefore a fresh chat session rather than continuing the old one.
 
 ---
 
@@ -88,6 +112,6 @@ Both tables reference `users(id)` with `ON DELETE CASCADE`, so deleting a user's
 
 - **Same reasoning as `google_id`** for the column-not-table and `UNIQUE` constraint choices — see above.
 - **Backward compatibility:** every pre-existing row (including ones created after migration 014) keeps `microsoft_id = NULL`; nothing about password or Google login changes. Same idempotent `information_schema`-guarded migration pattern.
-- **Weaker email-ownership guarantee than Google's.** `findOrCreateGoogleUser()` only links onto an existing account after checking Google's `email_verified: true` claim. Microsoft Graph's `/me` has no equivalent flag - `microsoftOAuth.service.js`'s `exchangeCodeForProfile()` uses `mail` (verified by Microsoft/the org) when present, but falls back to `userPrincipalName` (the sign-in identifier - typically, but not guaranteedly, a real mailbox) for Azure AD accounts with no mailbox assigned. In practice this only matters for the account-linking case (UC-13) - flagged for review, not yet resolved. A stricter fix would be to only auto-link when `mail` (not `userPrincipalName`) matches, and require explicit confirmation otherwise.
+- **Weaker email-ownership guarantee than Google's.** `findOrCreateGoogleUser()` only links onto an existing account after checking Google's `email_verified: true` claim. Microsoft Graph's `/me` has no equivalent flag - `microsoftOAuth.service.js`'s `exchangeCodeForProfile()` uses `mail` (verified by Microsoft/the org) when present, but falls back to `userPrincipalName` (the sign-in identifier - typically, but not guaranteedly, a real mailbox) for Azure AD accounts with no mailbox assigned. In practice this only matters for the account-linking case (UC-14) - flagged for review, not yet resolved. A stricter fix would be to only auto-link when `mail` (not `userPrincipalName`) matches, and require explicit confirmation otherwise.
 - **No avatar.** Unlike Google's `picture` claim, Microsoft Graph requires a separate authenticated call for a profile photo; `findOrCreateMicrosoftUser()` is always called with `avatar: null`, so Microsoft-created accounts start with no photo (same as any account that has never set one) rather than a `NULL` sentinel triggering special handling.
 - **Edge case not yet covered:** same as `google_id`'s note - a Microsoft-only account (`password_hash = NULL`) can't use the account-deletion/password-change re-confirmation flows, which require a real password.

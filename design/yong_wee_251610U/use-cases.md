@@ -1,8 +1,8 @@
 # Use Cases — AI Stock Analysis & Google/Microsoft OAuth
 
-**Owner:** Yong Wee (Person 1) · **Features:** "Analyze with AI" on the Screener (`server/src/{routes,controllers,services}/ai.*`), AI Analysis History (`client/src/pages/AiHistory.jsx`), AI Preferences (Settings → "AI preferences" tab), "Sign in with Google" / "Sign in with Microsoft" (`server/src/{routes,controllers}/auth.*`, `server/src/services/{googleOAuth,microsoftOAuth}.service.js`, `client/src/pages/Login.jsx`)
+**Owner:** Yong Wee (Person 1) · **Features:** "Analyze with AI" on the Screener (`server/src/{routes,controllers,services}/ai.*`), the follow-up chat widget shown under a completed run (`client/src/components/AiChatBox.jsx`, `client/src/lib/aiChatStorage.js`), AI Analysis History (`client/src/pages/AiHistory.jsx`), AI Preferences (Settings → "AI preferences" tab), "Sign in with Google" / "Sign in with Microsoft" (`server/src/{routes,controllers}/auth.*`, `server/src/services/{googleOAuth,microsoftOAuth}.service.js`, `client/src/pages/Login.jsx`)
 
-Three sets of use cases. UC-01 through UC-07 cover the AI qualitative-analysis feature: after a user shortlists stocks from the screener results, the app sends them to an LLM for a qualitative take (recent context, growth outlook, reasoning), lets the user revisit/edit/delete past runs, and lets them tune how the model analyzes (model tier, persona, detail level, custom instructions). UC-08 through UC-10 cover "Sign in with Google": logging in or signing up with a Google account instead of email/password. UC-11 through UC-13 cover "Sign in with Microsoft" - the same idea against a Microsoft account, added as a second button next to Google's on the same login page.
+Three sets of use cases. UC-01 through UC-09 cover the AI qualitative-analysis feature: after a user shortlists stocks from the screener results, the app sends them to an LLM for a qualitative take (recent context, growth outlook, reasoning), lets the user ask follow-up questions about that same run in a chat widget, lets the user revisit/edit/delete past runs, and lets them tune how the model analyzes (model tier, persona, detail level, custom instructions). UC-10 through UC-12 cover "Sign in with Google": logging in or signing up with a Google account instead of email/password. UC-13 through UC-14 cover "Sign in with Microsoft" - the same idea against a Microsoft account, added as a second button next to Google's on the same login page.
 
 ## Actors
 
@@ -15,7 +15,7 @@ Every `/api/ai/*` route requires authentication (`requireAuth`) **and** an activ
 | **Subscriber** | Logged in, active | Full access — primary actor below |
 | **Admin** | Logged in, active, admin | Same access as Subscriber (no elevated AI privileges) |
 
-The Google and Microsoft OAuth routes (`/api/auth/oauth/{google,microsoft}*`, UC-08–UC-13) are the odd ones out: they're deliberately reachable by a **Visitor** with no auth at all — they're an entry point *into* being logged in, same as `POST /auth/login`/`POST /auth/signup`, not a feature gated behind login.
+The Google and Microsoft OAuth routes (`/api/auth/oauth/{google,microsoft}*`, UC-09–UC-14) are the odd ones out: they're deliberately reachable by a **Visitor** with no auth at all — they're an entry point *into* being logged in, same as `POST /auth/login`/`POST /auth/signup`, not a feature gated behind login.
 
 ---
 
@@ -117,9 +117,27 @@ The Google and Microsoft OAuth routes (`/api/auth/oauth/{google,microsoft}*`, UC
   - *E2 — Save request fails:* inline error message; the draft is preserved so the user doesn't lose their edits.
   - *E3 — Custom instructions at the 1000-character cap:* further typing is truncated client-side; a `1000/1000` counter is shown.
 
+## UC-08 — Ask a follow-up question about a completed analysis
+
+- **Actor:** Subscriber
+- **Trigger:** After UC-01 or UC-02 completes and a write-up/comparison is showing, the user types a question into the "Ask a follow-up" box below it (or clicks one of three suggested prompts: "What are the biggest risks here?", "How does this compare to sector peers?", "What would change your take?") and sends it.
+- **Preconditions:** An analysis has just been produced in this page session — the widget (`AiChatBox.jsx`) only renders once `analysis`/`analysisId` are set, it isn't reachable independently of a run.
+- **Main flow:**
+  1. The client optimistically appends the question as a user bubble and calls `POST /api/ai/chat` with the full context needed to answer it: the shortlisted stocks (+ screener metric values), `mode`, the original analysis/comparison text, the preferences (persona/detail level/model tier/custom instructions) that run used, and every prior question/answer pair in this session.
+  2. The server is stateless for this endpoint — it does not look anything up — it re-derives a prompt from exactly the context it was handed, framed as "continuing a conversation about a shortlist you already analyzed," and calls the same configured model tier used for the original run.
+  3. The reply (markdown stripped, same as UC-01) comes back as `{ reply: "<text>" }` and is appended as an assistant bubble.
+  4. The full transcript, plus a snapshot of the stocks/mode/original analysis/preferences it's anchored to, is upserted into `localStorage` (`aiChatSessions`, see `aiChatStorage.js`) under a session id unique to this run, so re-opening AI Analysis History later shows the conversation next to the run it followed up on.
+- **Postcondition:** The conversation is visible in the widget and mirrored to this browser's `localStorage`; nothing is written to the database.
+- **Alternate / edge flows:**
+  - *E1 — Empty/whitespace-only question submitted:* the Send button stays disabled; no request is sent.
+  - *E2 — AI provider error:* `500`; the optimistic user bubble is rolled back (removed from the thread) and the typed text is restored into the input box so the user can retry, rather than leaving an unanswered question stuck in the transcript — see `AiChatBox.jsx`'s `send()`.
+  - *E3 — Re-running the analysis (UC-01/UC-02) on the same page:* a fresh `sessionId` is generated, so the chat widget remounts with an empty transcript rather than continuing the previous run's conversation.
+  - *E4 — Reopening AI Analysis History later:* the conversation shows up as its own card (`ChatSessionEntry`), separate from and merged chronologically with the DB-backed run cards from UC-03, labelled "Follow-up chat · this browser only" since it isn't synced to the account - clearing browser storage or switching devices loses it. Deletable independently via `deleteChatSession`, same confirm-dialog pattern as UC-06.
+  - *E5 — 40+ messages in one conversation, or a single question over 2000 characters:* rejected client-side against the same caps the server enforces (`chatRequestSchema` in `ai.controller.js`); in practice unreachable through the UI's own input handling, kept as a server-side backstop.
+
 ---
 
-## UC-08 — Sign up / log in with a Google account (first time)
+## UC-09 — Sign up / log in with a Google account (first time)
 
 - **Actor:** Visitor (not logged in, and this is the first time they've ever used this Google account with the app — neither `google_id` nor their Google email exists in `users`).
 - **Trigger:** User clicks the white "Continue with Google" button under the login/signup form on `/login`.
@@ -129,69 +147,69 @@ The Google and Microsoft OAuth routes (`/api/auth/oauth/{google,microsoft}*`, UC
   2. The user picks a Google account and grants access (`select_account` is forced, so a shared machine doesn't silently reuse whichever Google session is already active).
   3. Google redirects back to `GET /api/auth/oauth/google/callback` with an authorization `code`.
   4. The server verifies the CSRF `state`, exchanges the code for the user's verified Google profile, finds no matching `google_id` or email, and creates a brand-new account (`password_hash = NULL` — see migration 014) with `is_active = 0` like any other new signup.
-  5. A normal session cookie is issued (no email-OTP step — see UC-09's note) and the browser is redirected to `/login?oauth=success`.
+  5. A normal session cookie is issued (no email-OTP step — see UC-10's note) and the browser is redirected to `/login?oauth=success`.
   6. The client fetches `GET /api/auth/me`, logs the user in, and — since the new account isn't active yet — routes to `/activate`, same as a fresh password signup.
 - **Postcondition:** A new `users` row exists, linked to the Google account; the user is logged in and on the paywall page.
 - **Alternate / edge flows:**
   - *E1 — User cancels/denies consent on Google's screen:* redirected to `/login?oauth=error&message=Google+sign-in+was+cancelled`, shown inline; no account is created.
   - *E2 — Google account has no verified email:* rejected before any account is touched; generic "Google sign-in failed" message (doesn't reveal *why*, to avoid leaking account-enumeration-adjacent detail).
 
-## UC-09 — Log in with a Google account (returning user)
+## UC-10 — Log in with a Google account (returning user)
 
 - **Actor:** Visitor whose Google account is already linked (`google_id` matches an existing row).
 - **Trigger:** Same "Continue with Google" button.
-- **Main flow:** Same steps as UC-08, except step 4 finds the existing account by `google_id` immediately and step 6 routes to `/` (screener) instead of `/activate` if the account is already active, or `/activate` if it isn't (e.g. a lapsed subscription) — identical branching to a normal password login's `finishLogin()`.
+- **Main flow:** Same steps as UC-09, except step 4 finds the existing account by `google_id` immediately and step 6 routes to `/` (screener) instead of `/activate` if the account is already active, or `/activate` if it isn't (e.g. a lapsed subscription) — identical branching to a normal password login's `finishLogin()`.
 - **Postcondition:** The existing user is logged in.
 - **Note (design decision, flagged for review):** Google sign-in does **not** go through the app's email-OTP second factor (`verifyLoginOtp` — see the AI feature's sibling auth flow / `auth.controller.js`'s `login()`). Google has already authenticated the user (and enforces its own 2FA if the user has that turned on for their Google account), so a second emailed code would be redundant friction rather than added security.
 
-## UC-10 — Google sign-in on an email that already has a password account
+## UC-11 — Google sign-in on an email that already has a password account
 
 - **Actor:** Visitor with an existing password-based account under the same email as the Google account they sign in with.
 - **Trigger:** Same "Continue with Google" button, using a Google account whose (verified) email matches an existing `users.email`, but whose `google_id` has never been seen before.
 - **Main flow:**
-  1. Steps 1–3 as UC-08.
+  1. Steps 1–3 as UC-09.
   2. The server finds no `google_id` match, but finds an existing account by email. Because Google has already verified the caller controls that email address, the accounts are treated as the same person: `google_id` is written onto the existing row rather than creating a duplicate account.
-  3. From then on, that account can be logged into with **either** the original password (`POST /auth/login`, still going through email-OTP) **or** this Google account (skipping OTP, per UC-09's note) — both reach the same `users` row.
+  3. From then on, that account can be logged into with **either** the original password (`POST /auth/login`, still going through email-OTP) **or** this Google account (skipping OTP, per UC-10's note) — both reach the same `users` row.
 - **Postcondition:** One account, now reachable two ways; no duplicate account is created.
 - **Alternate / edge flows:**
   - *E1 — The email match happens between two different people (unlikely, since Google verifies the address):* out of scope — this app trusts Google's `email_verified` claim the same way `email-change/verify` trusts its own OTP as proof of address ownership.
 
-## UC-11 — Sign up / log in with a Microsoft account (first time)
+## UC-12 — Sign up / log in with a Microsoft account (first time)
 
 - **Actor:** Visitor (not logged in, and this is the first time they've ever used this Microsoft account with the app — neither `microsoft_id` nor their Microsoft account's email exists in `users`).
 - **Trigger:** User clicks the white "Continue with Microsoft" button, next to the Google one, under the login/signup form on `/login`.
-- **Preconditions:** None — same as UC-08, this button is shared by both the "login" and "signup" modes of the form, since a first-time Microsoft sign-in *is* the signup.
-- **Main flow:** Identical shape to UC-08, against the Microsoft identity platform instead of Google's:
+- **Preconditions:** None — same as UC-09, this button is shared by both the "login" and "signup" modes of the form, since a first-time Microsoft sign-in *is* the signup.
+- **Main flow:** Identical shape to UC-09, against the Microsoft identity platform instead of Google's:
   1. The browser navigates (full page load, not a fetch) to `GET /api/auth/oauth/microsoft`, which stashes a CSRF `state` value in a short-lived cookie (`ms_oauth_state`) and redirects to Microsoft's consent screen.
   2. The user picks a Microsoft account and grants access (`select_account` is forced, same reasoning as Google's).
   3. Microsoft redirects back to `GET /api/auth/oauth/microsoft/callback` with an authorization `code`.
   4. The server verifies the CSRF `state`, exchanges the code for the user's Microsoft Graph profile, finds no matching `microsoft_id` or email, and creates a brand-new account (`password_hash = NULL` — see migration 015) with `is_active = 0` like any other new signup.
-  5. A normal session cookie is issued (no email-OTP step — see UC-12's note) and the browser is redirected to `/login?oauth=success` - the exact same query string Google's flow uses, since both providers share one success/error contract on the client.
+  5. A normal session cookie is issued (no email-OTP step — see UC-13's note) and the browser is redirected to `/login?oauth=success` - the exact same query string Google's flow uses, since both providers share one success/error contract on the client.
   6. The client fetches `GET /api/auth/me`, logs the user in, and — since the new account isn't active yet — routes to `/activate`, same as a fresh password signup.
 - **Postcondition:** A new `users` row exists, linked to the Microsoft account; the user is logged in and on the paywall page.
 - **Alternate / edge flows:**
   - *E1 — User cancels/denies consent on Microsoft's screen:* redirected to `/login?oauth=error&message=Microsoft+sign-in+was+cancelled`, shown inline; no account is created.
-  - *E2 — Microsoft account has no usable email (`mail` and `userPrincipalName` both absent):* rejected before any account is touched; generic "Microsoft sign-in failed" message (doesn't reveal *why*, same reasoning as UC-08's E2).
+  - *E2 — Microsoft account has no usable email (`mail` and `userPrincipalName` both absent):* rejected before any account is touched; generic "Microsoft sign-in failed" message (doesn't reveal *why*, same reasoning as UC-09's E2).
 
-## UC-12 — Log in with a Microsoft account (returning user)
+## UC-13 — Log in with a Microsoft account (returning user)
 
 - **Actor:** Visitor whose Microsoft account is already linked (`microsoft_id` matches an existing row).
 - **Trigger:** Same "Continue with Microsoft" button.
-- **Main flow:** Same steps as UC-11, except step 4 finds the existing account by `microsoft_id` immediately and step 6 routes to `/` (screener) instead of `/activate` if the account is already active, or `/activate` if it isn't — identical branching to UC-09's returning-Google-user flow.
+- **Main flow:** Same steps as UC-12, except step 4 finds the existing account by `microsoft_id` immediately and step 6 routes to `/` (screener) instead of `/activate` if the account is already active, or `/activate` if it isn't — identical branching to UC-10's returning-Google-user flow.
 - **Postcondition:** The existing user is logged in.
-- **Note (design decision, flagged for review):** Same as UC-09's note for Google - Microsoft sign-in does **not** go through the app's email-OTP second factor. Microsoft has already authenticated the user (and enforces its own 2FA/Conditional Access if configured on the account or tenant), so a second emailed code would be redundant friction rather than added security.
+- **Note (design decision, flagged for review):** Same as UC-10's note for Google - Microsoft sign-in does **not** go through the app's email-OTP second factor. Microsoft has already authenticated the user (and enforces its own 2FA/Conditional Access if configured on the account or tenant), so a second emailed code would be redundant friction rather than added security.
 
-## UC-13 — Microsoft sign-in on an email that already has an account
+## UC-14 — Microsoft sign-in on an email that already has an account
 
 - **Actor:** Visitor with an existing account (password-based, or already Google-linked) under the same email as the Microsoft account they sign in with.
 - **Trigger:** Same "Continue with Microsoft" button, using a Microsoft account whose email matches an existing `users.email`, but whose `microsoft_id` has never been seen before.
 - **Main flow:**
-  1. Steps 1–3 as UC-11.
+  1. Steps 1–3 as UC-12.
   2. The server finds no `microsoft_id` match, but finds an existing account by email. The accounts are treated as the same person: `microsoft_id` is written onto the existing row rather than creating a duplicate account.
-  3. From then on, that account can be logged into with **any** of: the original password (`POST /auth/login`, still going through email-OTP), a linked Google account (skipping OTP, per UC-09), or this Microsoft account (skipping OTP, per UC-12) — all reach the same `users` row.
+  3. From then on, that account can be logged into with **any** of: the original password (`POST /auth/login`, still going through email-OTP), a linked Google account (skipping OTP, per UC-10), or this Microsoft account (skipping OTP, per UC-13) — all reach the same `users` row.
 - **Postcondition:** One account, now reachable by every linked method; no duplicate account is created.
 - **Alternate / edge flows:**
-  - *E1 — The email match happens between two different people:* out of scope, same as UC-10's E1 - but see the Database Schema doc's note that this is a **weaker guarantee than Google's**, since Microsoft Graph's `/me` has no `email_verified`-equivalent flag; a `mail`/`userPrincipalName` match is trusted as proof of ownership without that extra signal.
+  - *E1 — The email match happens between two different people:* out of scope, same as UC-11's E1 - but see the Database Schema doc's note that this is a **weaker guarantee than Google's**, since Microsoft Graph's `/me` has no `email_verified`-equivalent flag; a `mail`/`userPrincipalName` match is trusted as proof of ownership without that extra signal.
 
 ---
 
@@ -211,13 +229,16 @@ The Google and Microsoft OAuth routes (`/api/auth/oauth/{google,microsoft}*`, UC
 | Update/delete of a non-existent or another user's entry | `aiHistory.service.js` `AiAnalysisNotFoundError` | `404` |
 | Preferences PATCH with no recognized fields | `aiPreferences.controller.js` zod `.refine` | `400` |
 | Custom instructions over 1000 characters | Client `slice()` cap + server zod `max(1000)` | Truncated client-side; `400` if bypassed |
+| Empty/whitespace-only follow-up question submitted | `AiChatBox.jsx` `send()` guard | Send button disabled; `POST /api/ai/chat` never called |
+| Follow-up chat AI provider call fails | `ai.controller.js` `chatAboutStocks` / `AiChatBox.jsx` catch block | `500`; optimistic user bubble rolled back, input restored so the user can retry |
+| Follow-up chat request missing `originalAnalysis`/`question`, or `mode` outside `single`/`comparison` | `ai.controller.js` `chatRequestSchema` | `400` |
 | Unauthenticated | `requireAuth` + API `401` | Redirect to `/login` |
 | Inactive / unpaid account | `requireActiveAccount` + API `402` | Redirect to `/activate` |
 | User denies/cancels Google consent | `googleOAuthCallback` (`error` query param) | Redirect to `/login?oauth=error&message=...`; no account touched |
 | Forged/replayed/expired OAuth callback (`state` missing or mismatched) | `googleOAuthCallback`/`microsoftOAuthCallback` CSRF check | Redirect to `/login?oauth=error&message=...`; code exchange never attempted |
 | Google account has no verified email | `googleOAuth.service.js` `exchangeCodeForProfile` | Redirect to `/login?oauth=error&message=...`; no account touched |
-| Google email matches an existing password account | `auth.service.js` `findOrCreateGoogleUser` | `google_id` linked onto the existing row, not duplicated (see UC-10) |
+| Google email matches an existing password account | `auth.service.js` `findOrCreateGoogleUser` | `google_id` linked onto the existing row, not duplicated (see UC-11) |
 | User denies/cancels Microsoft consent | `microsoftOAuthCallback` (`error` query param) | Redirect to `/login?oauth=error&message=...`; no account touched |
 | Microsoft account has no usable email (`mail`/`userPrincipalName` both absent) | `microsoftOAuth.service.js` `exchangeCodeForProfile` | Redirect to `/login?oauth=error&message=...`; no account touched |
-| Microsoft email matches an existing account (password and/or Google-linked) | `auth.service.js` `findOrCreateMicrosoftUser` | `microsoft_id` linked onto the existing row, not duplicated (see UC-13) |
+| Microsoft email matches an existing account (password and/or Google-linked) | `auth.service.js` `findOrCreateMicrosoftUser` | `microsoft_id` linked onto the existing row, not duplicated (see UC-14) |
 | `GET /auth/me` fails right after a successful OAuth redirect (either provider) | `Login.jsx`'s shared `oauth=success` effect | Generic inline "Sign-in failed" message; user not marked logged in client-side |

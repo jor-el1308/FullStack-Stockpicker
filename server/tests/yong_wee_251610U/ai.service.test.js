@@ -5,7 +5,7 @@
  * provider or need a real API key.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getQualitativeAnalysis } from "../../src/services/ai.service.js";
+import { getQualitativeAnalysis, getFollowUpAnswer } from "../../src/services/ai.service.js";
 
 function mockFetchOk(responseBody) {
   global.fetch.mockResolvedValueOnce({
@@ -167,5 +167,76 @@ describe("ai.service - getQualitativeAnalysis", () => {
     await expect(getQualitativeAnalysis(singleStock, { aiModelTier: "claude-haiku" })).rejects.toThrow(
       /OPENROUTER_API_KEY is not set/
     );
+  });
+});
+
+describe("ai.service - getFollowUpAnswer", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+    process.env.AI_RECOMMENDATION_API_KEY = "test-gemini-key";
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.AI_RECOMMENDATION_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+  });
+
+  const baseContext = {
+    stocks: singleStock,
+    mode: "single",
+    originalAnalysis: "DBS Group Holdings: solid pick. This is not financial advice.",
+    question: "What are the biggest risks here?",
+  };
+
+  it("returns the model's reply with markdown stripped", async () => {
+    mockFetchOk({ candidates: [{ content: { parts: [{ text: "**Rate risk** is the main one." }] } }] });
+
+    const reply = await getFollowUpAnswer(baseContext);
+
+    expect(reply).toBe("Rate risk is the main one.");
+  });
+
+  it("weaves the original analysis, persona, and prior turns into the prompt sent to the model", async () => {
+    mockFetchOk({ candidates: [{ content: { parts: [{ text: "Fine." }] } }] });
+
+    await getFollowUpAnswer({
+      ...baseContext,
+      preferences: { aiPersona: "growth", customInstructions: "Focus on ASX-listed stocks." },
+      history: [{ role: "user", content: "How risky is this?" }, { role: "assistant", content: "Moderately." }],
+    });
+
+    const [, options] = global.fetch.mock.calls[0];
+    const prompt = JSON.parse(options.body).contents[0].parts[0].text;
+    expect(prompt).toContain("growth-focused financial analyst");
+    expect(prompt).toContain(baseContext.originalAnalysis);
+    expect(prompt).toContain("How risky is this?");
+    expect(prompt).toContain(baseContext.question);
+    expect(prompt).toContain("Focus on ASX-listed stocks.");
+  });
+
+  it("throws a clear error when AI_RECOMMENDATION_API_KEY is missing for the default tier", async () => {
+    delete process.env.AI_RECOMMENDATION_API_KEY;
+
+    await expect(getFollowUpAnswer(baseContext)).rejects.toThrow(/AI_RECOMMENDATION_API_KEY is not set/);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("throws when the model returns an empty response", async () => {
+    mockFetchOk({ candidates: [] });
+
+    await expect(getFollowUpAnswer(baseContext)).rejects.toThrow(/empty response/);
+  });
+
+  it("routes non-flash tiers through OpenRouter with a bearer token", async () => {
+    mockFetchOk({ choices: [{ message: { content: "GPT-4o mini follow-up answer." } }] });
+
+    const reply = await getFollowUpAnswer({ ...baseContext, preferences: { aiModelTier: "gpt-4o-mini" } });
+
+    expect(reply).toContain("GPT-4o mini follow-up answer.");
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(url).toContain("openrouter.ai");
+    expect(options.headers.Authorization).toBe("Bearer test-openrouter-key");
   });
 });
