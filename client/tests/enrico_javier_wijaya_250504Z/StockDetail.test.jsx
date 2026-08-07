@@ -8,6 +8,12 @@ import { getStockDetail, getStockPrices } from "../../src/api/stocks";
 vi.mock("../../src/api/stocks", () => ({
   getStockDetail: vi.fn(),
   getStockPrices: vi.fn(),
+  // The report page also carries an "add to watchlist" bell now - stub the
+  // notification calls so these tests stay focused on the detail view.
+  listSavedScreens: vi.fn().mockResolvedValue([]),
+  listWatchlist: vi.fn().mockResolvedValue([]),
+  addToWatchlist: vi.fn(),
+  removeFromWatchlist: vi.fn(),
 }));
 
 // The report page now also renders star/notes/target features backed by

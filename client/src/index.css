@@ -17,6 +17,19 @@
   --color-bg: var(--color-light-bg);
   --color-surface: #ffffff;
   --color-text: var(--color-dark-menu);
+  /* Ink versions of the accent colours: the accents themselves are tuned to
+     be *filled* (button/chip backgrounds), and #1a5c9e / #8a6f24 as TEXT on a
+     dark surface only reach ~2.4:1. These are the same hues re-tuned per
+     theme so links, secondary buttons and chip labels stay readable in both.
+     Use --color-link/--color-special-text for text, --color-clickable and
+     --color-special for fills and borders. */
+  --color-link: var(--color-clickable);
+  --color-special-text: #8a6f24;
+  /* Primary button fill. #1a5c9e is a strong blue against a white page but
+     only separates from the dark theme's card by ~2.2:1, so dark mode uses a
+     brighter blue that still clears 4.5:1 against the button's white label. */
+  --color-primary-fill: var(--color-clickable);
+  --color-primary-fill-hover: var(--color-clickable-hover);
 
   --font-title: "Inter", sans-serif;
   --font-body: "Inter", sans-serif;
@@ -29,6 +42,10 @@
   --color-text: #e8ecf5;
   --color-border: rgba(255, 255, 255, 0.12);
   --color-muted-text: rgba(255, 255, 255, 0.6);
+  --color-link: #7cb2ec;
+  --color-special-text: #e0c069;
+  --color-primary-fill: #2a72c0;
+  --color-primary-fill-hover: #3d86d6;
 }
 
 * {
@@ -53,7 +70,7 @@ h1, h2, h3, h4, label {
 }
 
 a, button {
-  color: var(--color-clickable);
+  color: var(--color-link);
 }
 
 /* Auth (login / signup) page */
@@ -176,7 +193,7 @@ a, button {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  color: var(--color-clickable);
+  color: var(--color-link);
   text-decoration: underline;
 }
 
@@ -638,7 +655,7 @@ a, button {
   font-family: var(--font-title);
   font-weight: 700;
   font-size: 12px;
-  color: var(--color-clickable);
+  color: var(--color-link);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding-bottom: 8px;
@@ -701,22 +718,25 @@ a, button {
 }
 
 .btn-primary {
-  background: var(--color-clickable);
+  background: var(--color-primary-fill);
   color: #ffffff;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--color-clickable-hover);
+  background: var(--color-primary-fill-hover);
 }
 
+/* Tinted rather than bare: --color-border is a 12% white hairline in dark
+   mode, which left secondary buttons as floating text with no visible edge. */
 .btn-secondary {
-  background: var(--color-surface);
-  color: var(--color-clickable);
-  border-color: var(--color-border);
+  background: color-mix(in srgb, var(--color-link) 8%, var(--color-surface));
+  color: var(--color-link);
+  border-color: color-mix(in srgb, var(--color-link) 42%, transparent);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  border-color: var(--color-clickable);
+  background: color-mix(in srgb, var(--color-link) 16%, var(--color-surface));
+  border-color: var(--color-link);
 }
 
 .btn-ghost {
@@ -726,7 +746,7 @@ a, button {
 }
 
 .btn-ghost:hover:not(:disabled) {
-  color: var(--color-clickable);
+  color: var(--color-link);
 }
 
 .btn-danger {
@@ -759,7 +779,7 @@ a, button {
 .chip-accent {
   border-color: rgba(26, 92, 158, 0.35);
   background: rgba(26, 92, 158, 0.06);
-  color: var(--color-clickable);
+  color: var(--color-link);
 }
 
 .chip-good {
@@ -771,7 +791,7 @@ a, button {
 .chip-special {
   border-color: rgba(201, 168, 76, 0.45);
   background: rgba(201, 168, 76, 0.1);
-  color: #8a6f24;
+  color: var(--color-special-text);
 }
 
 /* Togglable per-stock tabs on the AI Analysis History page */
@@ -803,7 +823,7 @@ a, button {
 .ai-history-tab.active {
   border-color: var(--color-clickable);
   background: rgba(26, 92, 158, 0.08);
-  color: var(--color-clickable);
+  color: var(--color-link);
   font-weight: 600;
 }
 
@@ -918,12 +938,12 @@ a, button {
   max-width: 260px;
   padding: 12px 14px;
   border-radius: 14px;
-  background: #ffffff;
-  border: 1px solid rgba(10, 22, 40, 0.12);
-  box-shadow: 0 14px 32px rgba(10, 22, 40, 0.12);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 14px 32px rgba(10, 22, 40, 0.28);
   font-size: 12.75px;
   line-height: 1.5;
-  color: #0a1628;
+  color: var(--color-text);
   font-weight: 500;
 }
 
@@ -1111,15 +1131,28 @@ a, button {
   color: var(--color-muted-text);
 }
 
-/* Dual-thumb range slider built from two native inputs.
-   --track-top is where the 3px track line sits inside .dual-range; everything
-   else (thumbs, fill, tick marks) is positioned relative to it. It grows when
-   .has-hist reserves room above the track for the distribution histogram. */
+/* Dual-thumb range slider (see AdvancedFilters.jsx RangeControl).
+
+   Geometry rules, because the old version got this wrong and the thumbs came
+   to rest visibly beside their stop points:
+
+   - .dual-range-rail is inset by half a thumb on each side. It is the exact
+     span a thumb *centre* can travel, so `left: N%` means the same x for the
+     thumb, the tick mark, the fill edge and the histogram bar boundary.
+   - --track-top is where the 3px track line sits inside .dual-range; thumbs,
+     fill, ticks and bars are all positioned off it. It grows when .has-hist
+     reserves room above the track for the distribution histogram. */
+.range-control {
+  --thumb-size: 16px;
+}
+
 .dual-range {
   --track-top: 10px;
   position: relative;
   height: 30px;
-  margin-top: 12px;
+  /* Room for the value bubble to sit above the thumb without pushing into the
+     criterion label. */
+  margin-top: 22px;
 }
 
 .dual-range.has-hist {
@@ -1127,60 +1160,16 @@ a, button {
   height: 66px;
 }
 
-.dual-range input[type="range"] {
+.dual-range-rail {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(var(--track-top) - 10px);
-  width: 100%;
-  height: 24px;
-  margin: 0;
-  background: none;
-  pointer-events: none;
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-.dual-range input[type="range"]:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px rgba(26, 92, 158, 0.3);
-}
-
-.dual-range input[type="range"]:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 3px rgba(26, 92, 158, 0.3);
-}
-
-.dual-range input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  pointer-events: auto;
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  border: 2px solid var(--color-clickable);
-  background: #ffffff;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--thumb-size) / 2);
+  right: calc(var(--thumb-size) / 2);
+  /* Take the whole press so clicking the track moves the nearer thumb, and
+     stop the browser from scrolling/zooming a touch drag out from under us. */
   cursor: pointer;
-  box-shadow: 0 1px 4px rgba(10, 22, 40, 0.25);
-  margin-top: -6px;
-}
-
-.dual-range input[type="range"]::-moz-range-thumb {
-  pointer-events: auto;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid var(--color-clickable);
-  background: #ffffff;
-  cursor: pointer;
-}
-
-.dual-range input[type="range"]::-webkit-slider-runnable-track {
-  height: 3px;
-  background: transparent;
-}
-
-.dual-range input[type="range"]::-moz-range-track {
-  height: 3px;
-  background: transparent;
+  touch-action: none;
 }
 
 .dual-range-track {
@@ -1201,8 +1190,8 @@ a, button {
   background: var(--color-clickable);
 }
 
-/* Stop points. Every notch the thumbs can land on gets a mark, so it's obvious
-   where the slider will snap to before you start dragging. */
+/* Stop points. Every notch gets a mark: the slider drags freely between them
+   but snaps onto one when you get close, so it helps to see where they are. */
 .dual-range-ticks {
   position: absolute;
   top: 0;
@@ -1226,11 +1215,66 @@ a, button {
   background: var(--color-clickable);
 }
 
-/* Value labels for a subset of the stops (see labelledTickIndices). */
+/* Thumbs. pointer-events:none on purpose — the rail handles every press and
+   decides which thumb to move, so two thumbs sitting on the same value can
+   never trap each other the way stacked native inputs did. Focus is moved
+   here programmatically on pointerdown so the keyboard picks up where the
+   drag left off. */
+.dual-range-thumb {
+  position: absolute;
+  top: calc(var(--track-top) + 1.5px);
+  width: var(--thumb-size);
+  height: var(--thumb-size);
+  margin: calc(var(--thumb-size) / -2) 0 0 0;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  border: 2px solid var(--color-clickable);
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(10, 22, 40, 0.25);
+  pointer-events: none;
+  touch-action: none;
+}
+
+.dual-range-thumb:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(26, 92, 158, 0.3);
+}
+
+.dual-range-thumb.is-dragging {
+  box-shadow: 0 0 0 4px rgba(26, 92, 158, 0.18), 0 1px 4px rgba(10, 22, 40, 0.25);
+}
+
+/* Value read-out above the thumb, shown while dragging or on keyboard focus
+   (the track can now stop anywhere, so the exact number matters). */
+.dual-range-bubble {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 6px;
+  border-radius: 5px;
+  white-space: nowrap;
+  font-family: var(--font-numeric);
+  font-size: 10px;
+  color: #ffffff;
+  background: var(--color-dark-menu, #16324f);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+}
+
+.dual-range-thumb.is-dragging .dual-range-bubble,
+.dual-range-thumb:focus-visible .dual-range-bubble,
+.dual-range-rail:hover .dual-range-bubble {
+  opacity: 1;
+}
+
+/* Value labels for a subset of the stops (see labelledTickIndices). Shares the
+   rail's inset so a label sits under the tick it belongs to. */
 .dual-range-scale {
   position: relative;
   height: 13px;
-  margin-top: 1px;
+  margin: 1px calc(var(--thumb-size) / 2) 0;
 }
 
 .dual-range-scale-label {
@@ -1243,33 +1287,25 @@ a, button {
   color: var(--color-muted-text);
 }
 
-.dual-range-scale-label:first-child {
-  transform: none;
-}
-
-.dual-range-scale-label:last-child {
-  transform: translateX(-100%);
-}
-
 /* Distribution histogram behind the slider: one bar per gap between two stop
-   points, so a bar always lines up with the track segment above it. */
+   points, absolutely positioned on the same scale as the ticks so a bar always
+   lines up with the track segment above it. */
 .slider-hist {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   /* Stops short of the track so the bars' tooltip hit areas never sit on top
-     of the slider thumbs, which start 10px above the track line. */
+     of the slider thumbs. */
   height: calc(var(--track-top) - 12px);
-  display: flex;
-  align-items: flex-end;
-  gap: 1px;
   pointer-events: none;
 }
 
 .slider-hist-slot {
-  flex: 1 1 0;
-  height: 100%;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding: 0 0.5px;
   display: flex;
   align-items: flex-end;
   pointer-events: auto;
@@ -1290,7 +1326,8 @@ a, button {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .slider-hist-bar {
+  .slider-hist-bar,
+  .dual-range-bubble {
     transition: none;
   }
 }
@@ -1309,6 +1346,54 @@ a, button {
   flex: 1 1 auto;
   text-align: center;
   opacity: 0.8;
+}
+
+/* Advanced Filters' sticky apply/save bar. It floats over the filter cards it
+   scrolls past, so it carries a heavier border and shadow than a normal card -
+   without those it read as just another panel on the dark theme, where the
+   card and page backgrounds are only a few percent apart. */
+.filter-apply-bar {
+  position: sticky;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-color: color-mix(in srgb, var(--color-link) 34%, var(--color-border));
+  box-shadow: 0 -2px 10px rgba(10, 22, 40, 0.16), 0 10px 30px rgba(10, 22, 40, 0.28);
+}
+
+.filter-apply-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.filter-apply-notice {
+  margin: 0;
+}
+
+/* Name field for "Save as Screen", shown above the buttons when opened. */
+.filter-save-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.filter-save-row label {
+  font-family: var(--font-title);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.filter-save-input {
+  width: 220px;
+  text-align: left;
 }
 
 /* Toggle switch used to enable/disable a criterion */
@@ -1440,6 +1525,58 @@ a, button {
   font-size: 13px;
 }
 
+/* Centered modal used by AddToWatchlistDialog (and available to any other
+   short "confirm these few fields" flow). */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(10, 22, 40, 0.45);
+}
+
+.modal-card {
+  width: min(460px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: 0 18px 48px rgba(10, 22, 40, 0.28);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-title);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.modal-body {
+  padding: 14px 16px 16px;
+}
+
+/* Inside the modal the form is a single column - the grid used on the
+   Watchlist page is sized for a full-width card. */
+.modal-body .watchlist-form-grid {
+  grid-template-columns: 1fr;
+}
+
 .watchlist-form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1454,7 +1591,8 @@ a, button {
   font-family: var(--font-title);
   font-size: 12px;
   font-weight: 600;
-  color: var(--color-dark-menu);
+  /* Theme-aware: --color-dark-menu is a fixed near-black. */
+  color: var(--color-text);
 }
 
 .watchlist-field input,
@@ -1465,8 +1603,8 @@ a, button {
   border-radius: 6px;
   font-family: var(--font-body);
   font-size: 13px;
-  color: var(--color-dark-menu);
-  background: #ffffff;
+  color: var(--color-text);
+  background: var(--color-surface);
 }
 
 .watchlist-field input:focus,
@@ -2004,7 +2142,7 @@ a, button {
 
 .settings-nav-item.active {
   background: var(--color-surface);
-  color: var(--color-clickable);
+  color: var(--color-link);
   font-weight: 600;
   box-shadow: inset 2px 0 0 var(--color-clickable);
 }

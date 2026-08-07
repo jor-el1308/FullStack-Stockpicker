@@ -914,7 +914,7 @@ export default function Admin() {
                             padding: 0,
                             fontFamily: fonts.numeric,
                             fontSize: 13,
-                            color: colors.clickable,
+                            color: colors.link,
                             cursor: "pointer",
                             textDecoration: "underline",
                           }}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Star } from "lucide-react";
+import { Bell, Star } from "lucide-react";
 import { colors, fonts } from "../theme";
 import { labelFor, formatValue } from "../screener/criteria";
 
@@ -21,7 +21,11 @@ const DEFAULT_PAGE_SIZE = 15;
  * Off by default (no `selectable` prop) so Dashboard's read-only usage is
  * unaffected.
  *
- * @param {{ rows: import("../../../shared/types/index.js").ScreenerResultRow[], onRowClick?: (row) => void, emptyMessage?: string, pageSize?: number, selectable?: boolean, selectedKeys?: Set<string>, onToggleRow?: (row) => void }} props
+ * The star and watchlist columns are opt-in the same way: pass `onToggleStar` /
+ * `onToggleWatch` and the column appears, leave them out and the table renders
+ * exactly as before.
+ *
+ * @param {{ rows: import("../../../shared/types/index.js").ScreenerResultRow[], onRowClick?: (row) => void, emptyMessage?: string, pageSize?: number, selectable?: boolean, selectedKeys?: Set<string>, onToggleRow?: (row) => void, starredKeys?: Set<string>, onToggleStar?: (row) => void, watchedKeys?: Set<string>, onToggleWatch?: (row) => void, watchBusyKeys?: Set<string> }} props
  */
 export default function ResultsTable({
   rows,
@@ -33,6 +37,9 @@ export default function ResultsTable({
   onToggleRow,
   starredKeys,
   onToggleStar,
+  watchedKeys,
+  onToggleWatch,
+  watchBusyKeys,
 }) {
   const [page, setPage] = useState(1);
 
@@ -68,6 +75,7 @@ export default function ResultsTable({
           <tr>
             {selectable && <th style={{ width: 32 }} />}
             {onToggleStar && <th style={{ width: 36 }} />}
+            {onToggleWatch && <th style={{ width: 36 }} />}
             <th>Exchange</th>
             <th>Stock Code</th>
             <th>Stock Name</th>
@@ -121,6 +129,32 @@ export default function ResultsTable({
                       style={{ background: "none", border: "none", cursor: "pointer", display: "inline-flex", padding: 2, color: colors.special }}
                     >
                       <Star size={16} fill={starredKeys?.has(rowKey) ? colors.special : "none"} />
+                    </button>
+                  </td>
+                )}
+                {onToggleWatch && (
+                  <td onClick={(e) => e.stopPropagation()} style={{ textAlign: "center" }}>
+                    <button
+                      type="button"
+                      onClick={() => onToggleWatch(row)}
+                      disabled={watchBusyKeys?.has(rowKey) ?? false}
+                      aria-label={
+                        watchedKeys?.has(rowKey)
+                          ? `Remove ${row.stockName} from watchlist`
+                          : `Add ${row.stockName} to watchlist`
+                      }
+                      title={watchedKeys?.has(rowKey) ? "On your watchlist - click to remove" : "Add to watchlist"}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: watchBusyKeys?.has(rowKey) ? "progress" : "pointer",
+                        display: "inline-flex",
+                        padding: 2,
+                        opacity: watchBusyKeys?.has(rowKey) ? 0.45 : 1,
+                        color: watchedKeys?.has(rowKey) ? colors.link : colors.mutedText,
+                      }}
+                    >
+                      <Bell size={16} fill={watchedKeys?.has(rowKey) ? colors.link : "none"} />
                     </button>
                   </td>
                 )}
