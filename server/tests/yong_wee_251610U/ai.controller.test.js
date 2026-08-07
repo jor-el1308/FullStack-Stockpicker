@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../../src/services/ai.service.js", () => ({
   getQualitativeAnalysis: vi.fn(),
+  getFollowUpAnswer: vi.fn(),
 }));
 // Partial mock: keep the real AiAnalysisNotFoundError class (so
 // `instanceof` checks in the controller still work) but stub every function
@@ -27,7 +28,7 @@ vi.mock("../../src/services/aiPreferences.service.js", () => ({
   getAiPreferences: vi.fn(),
 }));
 
-import { getQualitativeAnalysis } from "../../src/services/ai.service.js";
+import { getQualitativeAnalysis, getFollowUpAnswer } from "../../src/services/ai.service.js";
 import {
   saveAiAnalysis,
   listAiAnalysisHistory,
@@ -38,6 +39,7 @@ import {
 import { getAiPreferences } from "../../src/services/aiPreferences.service.js";
 import {
   analyzeStocks,
+  chatAboutStocks,
   getAiHistory,
   updateAiHistoryEntry,
   deleteAiHistoryEntry,
@@ -53,10 +55,12 @@ function mockRes() {
 const oneStock = [{ exchangeCode: "SGX", stockCode: "D05", stockName: "DBS Group Holdings" }];
 
 describe("ai.controller - analyzeStocks", () => {
+  const preferences = { aiPersona: "balanced", aiDetailLevel: "concise" };
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => {});
-    getAiPreferences.mockResolvedValue({});
+    getAiPreferences.mockResolvedValue(preferences);
   });
 
   it("rejects an empty stocks array with 400", async () => {
@@ -92,9 +96,13 @@ describe("ai.controller - analyzeStocks", () => {
 
     await analyzeStocks(req, res);
 
+    // `preferences` is echoed back alongside the analysis so the client can
+    // snapshot exactly what this run used into AiChatBox's follow-up context
+    // (see ai.controller.js) - it isn't re-derived from anything already in
+    // the response, so it has to be asserted explicitly.
     expect(res.json).toHaveBeenCalledWith({
       success: true,
-      data: { analysis: "DBS Group Holdings: solid pick.", mode: "single" },
+      data: { analysis: "DBS Group Holdings: solid pick.", mode: "single", preferences },
     });
     expect(saveAiAnalysis).toHaveBeenCalledWith("user-1", oneStock, "DBS Group Holdings: solid pick.");
   });
@@ -108,7 +116,10 @@ describe("ai.controller - analyzeStocks", () => {
 
     await analyzeStocks(req, res);
 
-    expect(res.json).toHaveBeenCalledWith({ success: true, data: { analysis: comparison, mode: "comparison" } });
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: { analysis: comparison, mode: "comparison", preferences },
+    });
     expect(saveAiAnalysis).toHaveBeenCalledWith(expect.anything(), expect.anything(), JSON.stringify(comparison));
   });
 
@@ -123,7 +134,7 @@ describe("ai.controller - analyzeStocks", () => {
     expect(res.status).not.toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({
       success: true,
-      data: { analysis: "Analysis text.", mode: "single" },
+      data: { analysis: "Analysis text.", mode: "single", preferences },
     });
   });
 
@@ -138,6 +149,85 @@ describe("ai.controller - analyzeStocks", () => {
     const [{ error }] = res.json.mock.calls[0];
     expect(error.message).toMatch(/AI_RECOMMENDATION_API_KEY/);
     expect(saveAiAnalysis).not.toHaveBeenCalled();
+  });
+});
+
+describe("ai.controller - chatAboutStocks", () => {
+  const baseChatBody = {
+    stocks: oneStock,
+    mode: "single",
+    originalAnalysis: "DBS Group Holdings: solid pick.",
+    preferences: { aiPersona: "balanced" },
+    history: [{ role: "user", content: "Earlier question" }, { role: "assistant", content: "Earlier answer" }],
+    question: "What are the biggest risks here?",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("rejects a request missing the original analysis with 400", async () => {
+    const req = { userId: "user-1", body: { ...baseChatBody, originalAnalysis: "" } };
+    const res = mockRes();
+
+    await chatAboutStocks(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(getFollowUpAnswer).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty question with 400", async () => {
+    const req = { userId: "user-1", body: { ...baseChatBody, question: "" } };
+    const res = mockRes();
+
+    await chatAboutStocks(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(getFollowUpAnswer).not.toHaveBeenCalled();
+  });
+
+  it("rejects a mode outside single/comparison with 400", async () => {
+    const req = { userId: "user-1", body: { ...baseChatBody, mode: "bulk" } };
+    const res = mockRes();
+
+    await chatAboutStocks(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(getFollowUpAnswer).not.toHaveBeenCalled();
+  });
+
+  it("returns the model's reply and forwards the full context to the service", async () => {
+    getFollowUpAnswer.mockResolvedValue("The main risk is rate sensitivity.");
+    const req = { userId: "user-1", body: baseChatBody };
+    const res = mockRes();
+
+    await chatAboutStocks(req, res);
+
+    expect(getFollowUpAnswer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stocks: oneStock,
+        mode: "single",
+        originalAnalysis: baseChatBody.originalAnalysis,
+        question: baseChatBody.question,
+      })
+    );
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: { reply: "The main risk is rate sensitivity." },
+    });
+  });
+
+  it("returns 500 with a hint about the required API keys when the AI provider call fails", async () => {
+    getFollowUpAnswer.mockRejectedValue(new Error("AI_RECOMMENDATION_API_KEY is not set"));
+    const req = { userId: "user-1", body: baseChatBody };
+    const res = mockRes();
+
+    await chatAboutStocks(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    const [{ error }] = res.json.mock.calls[0];
+    expect(error.message).toMatch(/AI_RECOMMENDATION_API_KEY/);
   });
 });
 

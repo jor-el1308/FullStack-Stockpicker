@@ -6,7 +6,7 @@
  * global.fetch is stubbed so no real network call happens.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { analyzeStocks, getAiHistory, updateAiHistoryEntry, deleteAiHistoryEntry } from "../../src/api/ai";
+import { analyzeStocks, chatAboutStocks, getAiHistory, updateAiHistoryEntry, deleteAiHistoryEntry } from "../../src/api/ai";
 import { getAiPreferences, updateAiPreferences } from "../../src/api/aiPreferences";
 
 function mockFetchJson(data) {
@@ -31,6 +31,27 @@ describe("api/ai.js", () => {
     expect(options.method).toBe("POST");
     expect(JSON.parse(options.body)).toEqual({ stocks });
     expect(result).toEqual({ analysis: "text", mode: "single" });
+  });
+
+  it("chatAboutStocks POSTs the full context to /api/ai/chat", async () => {
+    mockFetchJson({ reply: "The main risk is rate sensitivity." });
+    const stocks = [{ exchangeCode: "SGX", stockCode: "D05", stockName: "DBS Group Holdings" }];
+    const args = {
+      stocks,
+      mode: "single",
+      originalAnalysis: "DBS Group Holdings: solid pick.",
+      preferences: { aiPersona: "balanced" },
+      history: [],
+      question: "What are the biggest risks here?",
+    };
+
+    const result = await chatAboutStocks(args);
+
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(url).toBe("/api/ai/chat");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body)).toEqual(args);
+    expect(result).toEqual({ reply: "The main risk is rate sensitivity." });
   });
 
   it("getAiHistory GETs /api/ai/history", async () => {
