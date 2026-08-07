@@ -2,7 +2,7 @@
 
 **Owner:** Yong Wee (Person 1)
 
-Three features: (1) the AI qualitative-analysis feature — running an analysis on shortlisted stocks, managing saved analysis history, and reading/updating a user's AI preferences (`server/src/routes/ai.routes.js`, `server/src/controllers/{ai,aiPreferences}.controller.js`, `server/src/services/{ai,aiHistory,aiPreferences}.service.js`); (2) "Sign in with Google" — an alternate, password-less way to log in or sign up (`server/src/routes/auth.routes.js`'s `/oauth/google*` routes, `server/src/controllers/auth.controller.js`'s `googleOAuthStart`/`googleOAuthCallback`, `server/src/services/googleOAuth.service.js`, `server/src/services/auth.service.js`'s `findOrCreateGoogleUser`); and (3) "Sign in with Microsoft" — the same idea against a Microsoft/Azure AD account instead (`server/src/routes/auth.routes.js`'s `/oauth/microsoft*` routes, `server/src/controllers/auth.controller.js`'s `microsoftOAuthStart`/`microsoftOAuthCallback`, `server/src/services/microsoftOAuth.service.js`, `server/src/services/auth.service.js`'s `findOrCreateMicrosoftUser`).
+Three features: (1) the AI qualitative-analysis feature — running an analysis on shortlisted stocks, asking follow-up questions about a completed run, managing saved analysis history, and reading/updating a user's AI preferences (`server/src/routes/ai.routes.js`, `server/src/controllers/{ai,aiPreferences}.controller.js`, `server/src/services/{ai,aiHistory,aiPreferences}.service.js`); (2) "Sign in with Google" — an alternate, password-less way to log in or sign up (`server/src/routes/auth.routes.js`'s `/oauth/google*` routes, `server/src/controllers/auth.controller.js`'s `googleOAuthStart`/`googleOAuthCallback`, `server/src/services/googleOAuth.service.js`, `server/src/services/auth.service.js`'s `findOrCreateGoogleUser`); and (3) "Sign in with Microsoft" — the same idea against a Microsoft/Azure AD account instead (`server/src/routes/auth.routes.js`'s `/oauth/microsoft*` routes, `server/src/controllers/auth.controller.js`'s `microsoftOAuthStart`/`microsoftOAuthCallback`, `server/src/services/microsoftOAuth.service.js`, `server/src/services/auth.service.js`'s `findOrCreateMicrosoftUser`).
 
 ## Conventions
 
@@ -21,7 +21,7 @@ Three features: (1) the AI qualitative-analysis feature — running an analysis 
 
 ## 1. `POST /api/ai/analyze`
 
-Sends 1–10 shortlisted stocks to the configured AI model and returns a qualitative analysis. A **single** stock returns a free-text write-up; **two or more** return a structured head-to-head comparison. Best-effort persists the run to the caller's history (`ai_analysis` table) before responding — a persistence failure does not fail the request.
+Sends 1–10 shortlisted stocks to the configured AI model and returns a qualitative analysis. A **single** stock returns a free-text write-up; **two or more** return a structured head-to-head comparison. Best-effort persists the run to the caller's history (`ai_analysis` table) before responding — a persistence failure does not fail the request. The response also echoes back the AI preferences (persona/detail level/model tier/custom instructions) this run resolved and used - not re-derived from anything else in the payload, so the client snapshots it into the follow-up chat context (see `POST /api/ai/chat` below and `AiChatBox.jsx`) rather than relying on the user's *current* saved preferences, which could change later.
 
 - **Auth:** required + active
 - **Request body:**
@@ -50,7 +50,8 @@ Sends 1–10 shortlisted stocks to the configured AI model and returns a qualita
   "success": true,
   "data": {
     "mode": "single",
-    "analysis": "DBS Group Holdings: DBS continues to post steady net interest income growth... This is not financial advice."
+    "analysis": "DBS Group Holdings: DBS continues to post steady net interest income growth... This is not financial advice.",
+    "preferences": { "aiModelTier": "flash", "aiPersona": "balanced", "aiDetailLevel": "concise", "customInstructions": "" }
   }
 }
 ```
@@ -73,7 +74,8 @@ Sends 1–10 shortlisted stocks to the configured AI model and returns a qualita
       ],
       "summary": "Both are stable Singapore banks; DBS edges ahead on growth momentum.",
       "disclaimer": "This is not financial advice."
-    }
+    },
+    "preferences": { "aiModelTier": "flash", "aiPersona": "balanced", "aiDetailLevel": "concise", "customInstructions": "" }
   }
 }
 ```
@@ -85,7 +87,50 @@ Sends 1–10 shortlisted stocks to the configured AI model and returns a qualita
 
 ---
 
-## 2. `GET /api/ai/history`
+## 2. `POST /api/ai/chat`
+
+Asks a follow-up question about a shortlist that was already analyzed by endpoint 1 above (see `AiChatBox.jsx`, shown under a completed run on the Screener). **Stateless on the server** — no conversation is persisted server-side or looked up by an id; the caller re-sends the full context (the stocks, which mode/preferences produced the original run, the original analysis text, and every prior turn) with every question, and gets back just the next reply. The running transcript this backs is persisted client-side only, in `localStorage` (see Database Schema doc's "Not persisted to the database" note and `aiChatStorage.js`) — there is no `GET`/`id`-based equivalent of this endpoint.
+
+- **Auth:** required + active
+- **Request body:**
+
+```json
+{
+  "stocks": [
+    { "exchangeCode": "SGX", "stockCode": "D05", "stockName": "DBS Group Holdings", "values": { "marketCap": 95000000000 } }
+  ],
+  "mode": "single",
+  "originalAnalysis": "DBS Group Holdings: DBS continues to post steady net interest income growth... This is not financial advice.",
+  "preferences": { "aiModelTier": "flash", "aiPersona": "balanced", "aiDetailLevel": "concise", "customInstructions": "" },
+  "history": [
+    { "role": "user", "content": "What are the biggest risks here?" },
+    { "role": "assistant", "content": "Rate sensitivity is the main one to watch." }
+  ],
+  "question": "How does this compare to sector peers?"
+}
+```
+
+  - `stocks`: required, array, 1–10 items, same shape as endpoint 1's `stocks[]`.
+  - `mode`: required, one of `"single"` / `"comparison"` — must match whatever endpoint 1 returned for this run.
+  - `originalAnalysis`: required, non-empty string. For a comparison-mode run, this is the `JSON.stringify`'d comparison object (same text `ai_analysis.analysis_text` would store), not the parsed object.
+  - `preferences`: optional, a loose partial (`aiModelTier`/`aiPersona`/`aiDetailLevel`/`customInstructions`, all optional strings) — an unvalidated echo of whatever endpoint 1's response returned for `preferences`, not re-validated against the `AI_MODEL_TIERS`/`AI_PERSONAS`/`AI_DETAIL_LEVELS` enums; an unrecognized value just falls back to the same defaults `ai.service.js` uses elsewhere.
+  - `history`: optional, array, at most 40 items, each `{ role: "user" | "assistant", content: string (1–4000 chars) }` — every prior exchange in this conversation, oldest first.
+  - `question`: required, non-empty string, max 2000 characters.
+
+- **Success `200`:**
+
+```json
+{ "success": true, "data": { "reply": "Broadly in line with sector peers - similar loan growth, slightly better cost discipline. This is not financial advice." } }
+```
+
+- **Errors:**
+  - `400` — `stocks`/`mode`/`originalAnalysis`/`question` missing or invalid, `history` over 40 items, or a `history` entry/`question` over its character cap.
+  - `401` / `402` — see Conventions.
+  - `500` — the AI provider call failed, same causes as endpoint 1.
+
+---
+
+## 3. `GET /api/ai/history`
 
 Returns the logged-in user's saved analysis runs, latest first.
 
@@ -117,7 +162,7 @@ Returns the logged-in user's saved analysis runs, latest first.
 
 ---
 
-## 3. `PATCH /api/ai/history/:id`
+## 4. `PATCH /api/ai/history/:id`
 
 Renames a run and/or overwrites its analysis text. This is a user edit/annotation, **not** a re-run of the model. At least one of `title`/`analysisText` must be provided. Scoped to the logged-in user — a valid id belonging to someone else behaves as not-found.
 
@@ -153,7 +198,7 @@ Renames a run and/or overwrites its analysis text. This is a user edit/annotatio
 
 ---
 
-## 4. `DELETE /api/ai/history/:id`
+## 5. `DELETE /api/ai/history/:id`
 
 Permanently deletes one saved analysis run. Scoped to the logged-in user.
 
@@ -169,7 +214,7 @@ Permanently deletes one saved analysis run. Scoped to the logged-in user.
 
 ---
 
-## 5. `GET /api/ai/preferences`
+## 6. `GET /api/ai/preferences`
 
 Returns the logged-in user's saved AI preferences, or the defaults if they've never saved any (`{ aiModelTier: "flash", aiPersona: "balanced", aiDetailLevel: "concise", customInstructions: "" }`).
 
@@ -192,7 +237,7 @@ Returns the logged-in user's saved AI preferences, or the defaults if they've ne
 
 ---
 
-## 6. `PATCH /api/ai/preferences`
+## 7. `PATCH /api/ai/preferences`
 
 Upserts the caller's AI preferences (one row per user — `INSERT ... ON DUPLICATE KEY UPDATE`). Only the fields present in the body are changed; the rest keep their last-saved (or default) value. At least one field must be provided.
 
@@ -253,6 +298,8 @@ All error bodies follow `{ "success": false, "error": { "message": string, "code
 1. **Model/provider configuration is server-side only.** Which provider (`gemini` vs `openrouter`) and which underlying model a tier maps to lives in `MODEL_TIERS` (`ai.service.js`) — the client only ever sends/receives the tier id string (`"flash"`, `"gpt-4o-mini"`, etc.), never a raw model name or API key.
 2. **Environment variables required:** `AI_RECOMMENDATION_API_KEY` (Google Gemini, used for the default `"flash"` tier) and `OPENROUTER_API_KEY` (OpenRouter, used for `"gpt-4o-mini"`, `"claude-haiku"`, `"deepseek-chat"`) — see `server/.env.example`. Analysis requests fail with `500` if the key for the selected tier is missing.
 3. **`values` on each stock in `POST /api/ai/analyze` is optional but recommended** — it's the screener metric values (market cap, P/E, etc.) that get woven into the prompt so the model's reasoning ties back to *why* the stock passed the screen, not just its name.
+4. **`POST /api/ai/chat` is stateless and unauthenticated-by-id on purpose** — there is no server-side conversation record and no `chatSessionId` the client passes to resume one; every call is self-contained given the context it's handed. This keeps the endpoint's shape simple (no new table/migration) at the cost of the client having to resend `stocks`/`originalAnalysis`/`history` on every question, which grows with conversation length - acceptable given `history` is capped at 40 turns and each stays under 4000 characters (see the endpoint's validation above).
+5. **The client-side chat transcript (`aiChatStorage.js`) is not backed by this API at all.** Only the *next reply* comes from `POST /api/ai/chat`; persisting the running conversation across page loads/the AI Analysis History page is a `localStorage` concern on the client, not a server endpoint — see the Database Schema doc's note on why this stayed client-side for now.
 
 ---
 
