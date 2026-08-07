@@ -91,6 +91,10 @@ services:
       # actually reaches it, and proxy /api to the "server" service instead
       # of its own localhost (see client/vite.config.js).
       VITE_HOST: "0.0.0.0"
+      # vite.config.js defaults to port 5200 (a Windows-reserved-range
+      # workaround for host `npm run dev`); inside Docker that exclusion
+      # doesn't apply, so pin it back to 5173 to match the port mapping below.
+      VITE_PORT: "5173"
       VITE_API_PROXY_TARGET: http://server:4000
     ports:
       - "5173:5173"
