@@ -29,7 +29,7 @@ const inputStyle = {
   background: colors.lightBackground,
   color: colors.darkMenu,
 };
-const linkBtn = { background: "none", border: "none", cursor: "pointer", color: colors.clickable, fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel, fontSize: 12, padding: 0 };
+const linkBtn = { background: "none", border: "none", cursor: "pointer", color: colors.link, fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel, fontSize: 12, padding: 0 };
 
 export default function PriceTargetCard({ exchangeCode, stockCode, currentPrice }) {
   const [target, setTargetState] = useState(null); // number | null

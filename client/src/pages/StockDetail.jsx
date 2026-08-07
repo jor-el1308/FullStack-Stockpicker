@@ -6,7 +6,7 @@
  */
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { ArrowLeft, TrendingUp, TrendingDown, Star } from "lucide-react";
+import { ArrowLeft, TrendingUp, TrendingDown, Star, Bell } from "lucide-react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -17,10 +17,21 @@ import {
   CartesianGrid,
 } from "recharts";
 import { colors, fonts, fontWeights } from "../theme";
-import { getStockDetail, getStockPrices } from "../api/stocks";
+import {
+  getStockDetail,
+  getStockPrices,
+  listSavedScreens,
+  listWatchlist,
+  addToWatchlist,
+  removeFromWatchlist,
+} from "../api/stocks";
 import { listStarred, addStar, removeStar } from "../api/personal";
 import StockNotes from "../components/StockNotes";
 import PriceTargetCard from "../components/PriceTargetCard";
+import AddToWatchlistDialog, {
+  readWatchlistDefaults,
+  rememberWatchlistDefaults,
+} from "../components/AddToWatchlistDialog";
 
 const NEUTRAL = {
   white: "var(--color-surface)",
@@ -58,6 +69,17 @@ export default function StockDetail() {
   const [error, setError] = useState(null);
   const [starred, setStarred] = useState(false);
   const requestSeq = useRef(0);
+
+  // Watchlist (Person 5). Both the Screener and the Dashboard link into this
+  // page, so putting the bell here covers "add the stock I'm actually looking
+  // at" from either of them without a trip to the Watchlist page.
+  const [watchItem, setWatchItem] = useState(null); // the watchlist row, if any
+  const [savedScreens, setSavedScreens] = useState([]);
+  const [watchDialogOpen, setWatchDialogOpen] = useState(false);
+  const [watchSubmitting, setWatchSubmitting] = useState(false);
+  const [watchDialogError, setWatchDialogError] = useState(null);
+  const [watchBusy, setWatchBusy] = useState(false);
+  const [watchDefaults, setWatchDefaults] = useState(readWatchlistDefaults);
 
   // Screener ("/") and Dashboard ("/dashboard") both link here, so "back"
   // shouldn't be hard-coded to one of them - go back exactly one step in
@@ -133,6 +155,70 @@ export default function StockDetail() {
     }
   }
 
+  // Is this stock already on the watchlist? Failures here are silent: the
+  // watchlist is a side feature of this page, not what the user came for.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([listWatchlist().catch(() => []), listSavedScreens().catch(() => [])]).then(
+      ([watchRows, screens]) => {
+        if (cancelled) return;
+        setWatchItem(
+          (watchRows ?? []).find(
+            (item) => item.exchange_code === exchangeCode && item.stock_code === stockCode
+          ) ?? null
+        );
+        setSavedScreens(screens ?? []);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [exchangeCode, stockCode]);
+
+  async function toggleWatch() {
+    if (!watchItem) {
+      setWatchDialogError(null);
+      setWatchDialogOpen(true);
+      return;
+    }
+    setWatchBusy(true);
+    try {
+      await removeFromWatchlist(watchItem.id);
+      setWatchItem(null);
+    } catch {
+      // Leave the bell as-is; the Watchlist page will show the real state.
+    } finally {
+      setWatchBusy(false);
+    }
+  }
+
+  async function submitWatch(values) {
+    setWatchSubmitting(true);
+    setWatchDialogError(null);
+    try {
+      const created = await addToWatchlist({
+        exchangeCode,
+        stockCode,
+        savedCriteriaSetId: values.savedCriteriaSetId || undefined,
+        channel: values.channel,
+        recipientNumber: values.recipientNumber || undefined,
+      });
+      setWatchItem({
+        id: created?.id,
+        exchange_code: exchangeCode,
+        stock_code: stockCode,
+        channel: values.channel,
+      });
+      setWatchDefaults(values);
+      rememberWatchlistDefaults(values);
+      setWatchDialogOpen(false);
+    } catch (err) {
+      setWatchDialogError(err.message || "Unable to add stock to watchlist.");
+    } finally {
+      setWatchSubmitting(false);
+    }
+  }
+
   if (loading) {
     return <div style={{ fontFamily: fonts.description, color: NEUTRAL.textMuted, padding: 28 }}>Loading stock…</div>;
   }
@@ -145,7 +231,7 @@ export default function StockDetail() {
         </div>
         <button
           onClick={handleBack}
-          style={{ color: colors.clickable, background: "none", border: "none", cursor: "pointer", fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel }}
+          style={{ color: colors.link, background: "none", border: "none", cursor: "pointer", fontFamily: fonts.titleLabel, fontWeight: fontWeights.titleLabel }}
         >
           Back to results
         </button>
@@ -198,7 +284,7 @@ export default function StockDetail() {
           gap: 6,
           background: "none",
           border: "none",
-          color: colors.clickable,
+          color: colors.link,
           fontFamily: fonts.titleLabel,
           fontWeight: fontWeights.titleLabel,
           fontSize: 13,
@@ -223,6 +309,23 @@ export default function StockDetail() {
               style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 2, color: colors.special }}
             >
               <Star size={20} fill={starred ? colors.special : "none"} />
+            </button>
+            <button
+              onClick={toggleWatch}
+              disabled={watchBusy}
+              aria-label={watchItem ? "Remove this stock from your watchlist" : "Add this stock to your watchlist"}
+              title={watchItem ? "On your watchlist - click to remove" : "Add to watchlist"}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: watchBusy ? "progress" : "pointer",
+                display: "flex",
+                padding: 2,
+                opacity: watchBusy ? 0.45 : 1,
+                color: watchItem ? colors.link : colors.mutedText,
+              }}
+            >
+              <Bell size={20} fill={watchItem ? colors.link : "none"} />
             </button>
           </div>
           <div style={{ fontFamily: fonts.numeric, fontWeight: fontWeights.numeric, fontSize: 13, color: NEUTRAL.textMuted, marginTop: 4 }}>
@@ -267,8 +370,20 @@ export default function StockDetail() {
                 tickLine={false}
                 domain={["auto", "auto"]}
               />
+              {/* Recharts defaults the tooltip card to white; without these it
+                  stayed white in dark mode while its text followed the theme
+                  and turned near-white too. */}
               <Tooltip
-                contentStyle={{ fontFamily: fonts.numeric, fontSize: 12, borderRadius: 8, border: `1px solid ${NEUTRAL.border}` }}
+                contentStyle={{
+                  fontFamily: fonts.numeric,
+                  fontSize: 12,
+                  borderRadius: 8,
+                  border: `1px solid ${NEUTRAL.border}`,
+                  background: NEUTRAL.white,
+                  color: colors.darkMenu,
+                }}
+                labelStyle={{ color: NEUTRAL.textMuted }}
+                itemStyle={{ color: colors.darkMenu }}
                 labelFormatter={(d) => d}
                 formatter={(v) => [fmt(v), "Close"]}
               />
@@ -327,6 +442,21 @@ export default function StockDetail() {
       </div>
 
       <StockNotes exchangeCode={detail.exchangeCode} stockCode={detail.stockCode} />
+
+      {watchDialogOpen && (
+        <AddToWatchlistDialog
+          stock={{ exchangeCode, stockCode, stockName: detail.stockName }}
+          savedScreens={savedScreens}
+          defaults={watchDefaults}
+          submitting={watchSubmitting}
+          error={watchDialogError}
+          onSubmit={submitWatch}
+          onClose={() => {
+            setWatchDialogOpen(false);
+            setWatchDialogError(null);
+          }}
+        />
+      )}
     </div>
   );
 }

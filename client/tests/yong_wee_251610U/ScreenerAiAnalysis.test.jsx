@@ -25,7 +25,15 @@ import { useAuth } from "../../src/context/AuthContext";
 
 vi.mock("../../src/api/ai", () => ({ analyzeStocks: vi.fn(), chatAboutStocks: vi.fn() }));
 vi.mock("../../src/api/aiPreferences", () => ({ getAiPreferences: vi.fn() }));
-vi.mock("../../src/api/stocks", () => ({ saveScreen: vi.fn() }));
+// Screener also reads the watchlist + saved screens for its per-row "add to
+// watchlist" bell; stub them so this file still only exercises the AI flow.
+vi.mock("../../src/api/stocks", () => ({
+  saveScreen: vi.fn(),
+  listSavedScreens: vi.fn(() => Promise.resolve([])),
+  listWatchlist: vi.fn(() => Promise.resolve([])),
+  addToWatchlist: vi.fn(() => Promise.resolve({})),
+  removeFromWatchlist: vi.fn(() => Promise.resolve()),
+}));
 vi.mock("../../src/context/ScreenerContext", () => ({ useScreener: vi.fn() }));
 vi.mock("../../src/context/AuthContext", () => ({ useAuth: vi.fn() }));
 

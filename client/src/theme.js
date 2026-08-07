@@ -11,7 +11,11 @@ export const colors = {
   darkMenu: "var(--color-text)",
   lightBackground: "var(--color-bg)", // Page/section background - theme-aware
   surface: "var(--color-surface)", // Card/input/button surface background - theme-aware
-  clickable: "#1A5C9E", // Clickable things (links, buttons)
+  clickable: "#1A5C9E", // Clickable things - use for FILLS (button/badge backgrounds)
+  // Same accent, re-tuned per theme for use as TEXT (links, icon buttons).
+  // The flat #1A5C9E only reaches ~2.4:1 on the dark theme's surface, which
+  // is what made links and secondary buttons hard to read in dark mode.
+  link: "var(--color-link)",
   goodNumber: "#00A86B", // Positive/good numbers (e.g. price up, good financials)
   badNumber: "#D16B6B", // Negative/bad numbers
   special: "#C9A84C", // Special features / highlights

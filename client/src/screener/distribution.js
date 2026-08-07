@@ -25,10 +25,15 @@ import { CRITERIA_META, ticksFor } from "./criteria";
  * @param {Record<string, { enabled: boolean, min: number|null, max: number|null }>} uiValues
  *   Current per-criterion filter state, in UI units.
  * @returns {{
- *   byKey: Record<string, { counts: number[], max: number, shown: number }>,
+ *   byKey: Record<string, { counts: number[], max: number, shown: number, selected: number }>,
  *   matching: number,
  *   total: number,
  * }}
+ *
+ * `shown` is how many stocks the histogram is drawn from (everything passing
+ * the *other* enabled criteria). `selected` is the subset of those that also
+ * fall inside this criterion's own min/max, i.e. what the slider is currently
+ * keeping - so it moves as you drag.
  */
 export function buildHistograms(dist, uiValues) {
   const empty = { byKey: {}, matching: 0, total: 0 };
@@ -95,6 +100,7 @@ export function buildHistograms(dist, uiValues) {
     const own = constraintIndexByKey.get(key);
     const ownMask = own != null ? masks[own] : null;
     let shown = 0;
+    let selected = 0;
 
     for (let r = 0; r < total; r++) {
       const fails = failCounts[r];
@@ -107,9 +113,12 @@ export function buildHistograms(dist, uiValues) {
       if (raw == null) continue;
       counts[binIndex(ticks, raw / meta.scale)]++;
       shown++;
+      // fails === 0 means the row also satisfies this criterion's own range,
+      // so it is inside the slider's current selection.
+      if (fails === 0) selected++;
     }
 
-    byKey[key] = { counts, max: Math.max(0, ...counts), shown };
+    byKey[key] = { counts, max: Math.max(0, ...counts), shown, selected };
   }
 
   return { byKey, matching, total };

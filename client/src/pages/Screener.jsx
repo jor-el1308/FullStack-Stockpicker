@@ -11,9 +11,14 @@ import { SlidersHorizontal, Play, Bookmark, RefreshCw, Sparkles, X } from "lucid
 import ResultsTable from "../components/ResultsTable";
 import AiComparisonTable from "../components/AiComparisonTable";
 import AiChatBox from "../components/AiChatBox";
+import AddToWatchlistDialog, {
+  readWatchlistDefaults,
+  rememberWatchlistDefaults,
+} from "../components/AddToWatchlistDialog";
 import { useScreener } from "../context/ScreenerContext";
 import { useAuth } from "../context/AuthContext";
-import { saveScreen } from "../api/stocks";
+import { listSavedScreens, listWatchlist, addToWatchlist, removeFromWatchlist } from "../api/stocks";
+import { persistScreen } from "../screener/savedScreens";
 import { analyzeStocks } from "../api/ai";
 import { getAiPreferences } from "../api/aiPreferences";
 import { AI_MODEL_OPTIONS, AI_PERSONA_OPTIONS, AI_DETAIL_OPTIONS } from "../constants/aiPreferences";
@@ -21,7 +26,6 @@ import { describeRange } from "../screener/criteria";
 
 const MAX_AI_SELECTION = 10;
 
-const LOCAL_SCREENS_KEY = "localSavedScreens";
 
 export default function Screener() {
   const navigate = useNavigate();
@@ -70,6 +74,111 @@ export default function Screener() {
       .then(setAiPrefs)
       .catch(() => {});
   }, [user]);
+
+  // ---- Watchlist (Person 5) ------------------------------------------------
+  // Adding a stock used to mean leaving the results, going to the Watchlist
+  // page and retyping its exchange + code by hand. The bell in each row does
+  // the same thing with the identity already filled in.
+  const [watchlist, setWatchlist] = useState([]);
+  const [savedScreens, setSavedScreens] = useState([]);
+  const [watchDialogRow, setWatchDialogRow] = useState(null);
+  const [watchSubmitting, setWatchSubmitting] = useState(false);
+  const [watchDialogError, setWatchDialogError] = useState(null);
+  const [watchBusyKeys, setWatchBusyKeys] = useState(new Set());
+  const [watchMsg, setWatchMsg] = useState(null);
+  const [watchDefaults, setWatchDefaults] = useState(readWatchlistDefaults);
+
+  useEffect(() => {
+    if (!user) {
+      setWatchlist([]);
+      setSavedScreens([]);
+      return;
+    }
+    let cancelled = false;
+    // Both are decoration on this page - if either fails (e.g. the account
+    // isn't activated yet) the screener itself must still work, so failures
+    // only cost the bell column its "already watching" state.
+    Promise.all([listWatchlist().catch(() => []), listSavedScreens().catch(() => [])]).then(
+      ([watchRows, screens]) => {
+        if (cancelled) return;
+        setWatchlist(watchRows ?? []);
+        setSavedScreens(screens ?? []);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  const watchedKeys = useMemo(
+    () => new Set(watchlist.map((item) => `${item.exchange_code}-${item.stock_code}`)),
+    [watchlist]
+  );
+
+  function markBusy(key, busy) {
+    setWatchBusyKeys((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
+
+  /** Bell click: open the dialog to add, or take the stock straight off. */
+  async function handleToggleWatch(row) {
+    if (!user) {
+      setWatchMsg("Log in to keep a watchlist.");
+      return;
+    }
+    const key = `${row.exchangeCode}-${row.stockCode}`;
+    const existing = watchlist.find((item) => `${item.exchange_code}-${item.stock_code}` === key);
+
+    if (!existing) {
+      setWatchDialogError(null);
+      setWatchDialogRow(row);
+      return;
+    }
+
+    setWatchMsg(null);
+    markBusy(key, true);
+    try {
+      await removeFromWatchlist(existing.id);
+      setWatchlist((prev) => prev.filter((item) => item.id !== existing.id));
+      setWatchMsg(`Removed ${row.stockName ?? row.stockCode} from your watchlist.`);
+    } catch (err) {
+      setWatchMsg(`Could not remove ${row.stockCode}: ${err.message}`);
+    } finally {
+      markBusy(key, false);
+    }
+  }
+
+  async function handleAddToWatchlist(values) {
+    const row = watchDialogRow;
+    if (!row) return;
+    setWatchSubmitting(true);
+    setWatchDialogError(null);
+    try {
+      await addToWatchlist({
+        exchangeCode: row.exchangeCode,
+        stockCode: row.stockCode,
+        savedCriteriaSetId: values.savedCriteriaSetId || undefined,
+        channel: values.channel,
+        recipientNumber: values.recipientNumber || undefined,
+      });
+      // Re-read rather than pushing the POST response: the list endpoint joins
+      // in stock_name, which the create response doesn't return.
+      const rows = await listWatchlist().catch(() => null);
+      if (rows) setWatchlist(rows);
+      setWatchDefaults(values);
+      rememberWatchlistDefaults(values);
+      setWatchDialogRow(null);
+      setWatchMsg(`Added ${row.stockName ?? row.stockCode} to your watchlist.`);
+    } catch (err) {
+      setWatchDialogError(err.message || "Unable to add stock to watchlist.");
+    } finally {
+      setWatchSubmitting(false);
+    }
+  }
 
   const selectedRows = useMemo(
     () => (results ?? []).filter((r) => selectedKeys.has(`${r.exchangeCode}-${r.stockCode}`)),
@@ -142,33 +251,18 @@ export default function Screener() {
     const name = screenName.trim();
     if (!name || activeCriteria.length === 0) return;
     setSaveMsg(null);
-    if (user) {
-      try {
-        await saveScreen(
-          name,
-          activeCriteria.map(({ key, min, max, weight }) => ({
-            key,
-            ...(min != null && min !== "" ? { min: Number(min) } : {}),
-            ...(max != null && max !== "" ? { max: Number(max) } : {}),
-            ...(weight ? { weight: Number(weight) } : {}),
-          }))
-        );
-        setSaveMsg(`Saved "${name}" to your account.`);
-      } catch (err) {
-        setSaveMsg(`Could not save: ${err.message}`);
-        return;
-      }
-    } else {
-      const stored = JSON.parse(localStorage.getItem(LOCAL_SCREENS_KEY) ?? "[]");
-      stored.unshift({
-        id: `local-${Date.now()}`,
-        name,
-        createdAt: new Date().toISOString(),
-        criteria: activeCriteria,
-        local: true,
-      });
-      localStorage.setItem(LOCAL_SCREENS_KEY, JSON.stringify(stored));
-      setSaveMsg(`Saved "${name}" in this browser. Log in to sync screens to your account.`);
+    try {
+      // Shared with Advanced Filters' "Save as Screen" so both routes store
+      // the same shape and fall back to localStorage the same way.
+      const { scope } = await persistScreen(name, activeCriteria, { user });
+      setSaveMsg(
+        scope === "account"
+          ? `Saved "${name}" to your account.`
+          : `Saved "${name}" in this browser. Log in to sync screens to your account.`
+      );
+    } catch (err) {
+      setSaveMsg(`Could not save: ${err.message}`);
+      return;
     }
     setScreenName("");
     setSaveOpen(false);
@@ -257,6 +351,12 @@ export default function Screener() {
         </p>
       )}
 
+      {watchMsg && (
+        <p className="page-subtitle" style={{ marginBottom: 12 }}>
+          {watchMsg} <Link to="/watchlist">View watchlist</Link>
+        </p>
+      )}
+
       {/* Active criteria summary */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
         {activeCriteria.map((c) => (
@@ -320,7 +420,7 @@ export default function Screener() {
           <p className="page-subtitle" style={{ padding: "10px 16px 0" }}>
             Tick rows to shortlist up to {MAX_AI_SELECTION} stocks, then use the AI button in the bottom-right
             corner for a qualitative take on a single stock, or a structured comparison when you select more
-            than one.
+            than one. Use the bell to put a stock on your <Link to="/watchlist">watchlist</Link>.
           </p>
         )}
         <div style={{ overflowX: "auto", padding: "0 8px 8px" }}>
@@ -335,6 +435,9 @@ export default function Screener() {
               selectable
               selectedKeys={selectedKeys}
               onToggleRow={toggleRow}
+              watchedKeys={watchedKeys}
+              onToggleWatch={handleToggleWatch}
+              watchBusyKeys={watchBusyKeys}
               emptyMessage={
                 error
                   ? "No results — the screener API is unavailable."
@@ -464,6 +567,21 @@ export default function Screener() {
           </button>
           <span className="ai-fab-badge">{aiModelLabel}</span>
         </div>
+      )}
+
+      {watchDialogRow && (
+        <AddToWatchlistDialog
+          stock={watchDialogRow}
+          savedScreens={savedScreens}
+          defaults={watchDefaults}
+          submitting={watchSubmitting}
+          error={watchDialogError}
+          onSubmit={handleAddToWatchlist}
+          onClose={() => {
+            setWatchDialogRow(null);
+            setWatchDialogError(null);
+          }}
+        />
       )}
     </section>
   );
