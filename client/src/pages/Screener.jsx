@@ -186,17 +186,13 @@ export default function Screener() {
   const aiDetailLabel =
     AI_DETAIL_OPTIONS.find((d) => d.id === (aiPrefs?.aiDetailLevel ?? AI_DETAIL_OPTIONS[0].id))?.label ??
     AI_DETAIL_OPTIONS[0].label;
-  const aiFabTooltip =
-    selectedRows.length === 0
-      ? "Select rows in the results table first"
-      : [
-          `Analyze ${selectedRows.length} stock${selectedRows.length === 1 ? "" : "s"} with AI`,
-          `Persona: ${aiPersonaLabel}`,
-          `Detail level: ${aiDetailLabel}`,
-          aiPrefs?.customInstructions ? `Custom instructions: ${aiPrefs.customInstructions}` : null,
-        ]
-          .filter(Boolean)
-          .join("\n");
+  const aiFabTooltipRows = [
+    { label: "Persona", value: aiPersonaLabel },
+    { label: "Detail level", value: aiDetailLabel },
+    ...(aiPrefs?.customInstructions
+      ? [{ label: "Custom instructions", value: aiPrefs.customInstructions }]
+      : []),
+  ];
   const showAnalysisPanel = analyzing || analysis || analyzeError;
 
   return (
@@ -322,7 +318,7 @@ export default function Screener() {
         </div>
         {results && results.length > 0 && (
           <p className="page-subtitle" style={{ padding: "10px 16px 0" }}>
-            Tick rows to shortlist up to {MAX_AI_SELECTION} stocks, then use the AI button in the bottom-left
+            Tick rows to shortlist up to {MAX_AI_SELECTION} stocks, then use the AI button in the bottom-right
             corner for a qualitative take on a single stock, or a structured comparison when you select more
             than one.
           </p>
@@ -427,26 +423,46 @@ export default function Screener() {
       )}
 
       {/* Floating "Analyze with AI" launcher, chatbot-widget style: a small
-          circular button pinned to the bottom-left of the viewport rather
+          circular button pinned to the bottom-right of the viewport rather
           than competing with the other page actions above. It steps aside
           while the analysis panel is open (like a chat bubble that hides
           behind its own open panel) and reappears once it's closed. */}
       {!showAnalysisPanel && (
-        <div className="ai-fab-wrap" title={aiFabTooltip}>
-          <span className="ai-fab-badge">{aiModelLabel}</span>
+        <div className="ai-fab-wrap">
+          {/* Custom hover card (CSS-only, shown via .ai-fab-wrap:hover/:focus-within)
+              instead of a plain native title tooltip, so the rest of the AI
+              preferences read as a small styled card rather than a browser tooltip. */}
+          <div className="ai-fab-tooltip" aria-hidden="true">
+            <div className="ai-fab-tooltip-title">
+              <Sparkles size={12} />
+              AI preferences
+            </div>
+            <dl className="ai-fab-tooltip-list">
+              {aiFabTooltipRows.map((row) => (
+                <div className="ai-fab-tooltip-row" key={row.label}>
+                  <dt>{row.label}</dt>
+                  <dd>{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+            {selectedRows.length === 0 && (
+              <div className="ai-fab-tooltip-hint">Select rows in the results table first</div>
+            )}
+          </div>
           <button
             className="ai-fab"
             onClick={handleAnalyze}
             disabled={selectedRows.length === 0 || analyzing}
             aria-label={
               selectedRows.length === 0
-                ? "Analyze with AI (select rows in the results table first)"
-                : `Analyze ${selectedRows.length} selected stock${selectedRows.length === 1 ? "" : "s"} with AI`
+                ? `Analyze with AI, using ${aiModelLabel} (select rows in the results table first)`
+                : `Analyze ${selectedRows.length} selected stock${selectedRows.length === 1 ? "" : "s"} with AI, using ${aiModelLabel}`
             }
           >
             <Sparkles size={22} />
             {selectedRows.length > 0 && <span className="ai-fab-count">{selectedRows.length}</span>}
           </button>
+          <span className="ai-fab-badge">{aiModelLabel}</span>
         </div>
       )}
     </section>

@@ -520,17 +520,17 @@ a, button {
 }
 
 /* Floating "Analyze with AI" launcher (Screener.jsx) - a circular chatbot-
-   style bubble pinned to the bottom-left corner, so it stays reachable
+   style bubble pinned to the bottom-right corner, so it stays reachable
    without competing with the page's other action buttons. */
 .ai-fab-wrap {
   position: fixed;
-  left: 20px;
+  right: 20px;
   bottom: 20px;
   z-index: 100;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
 }
 
 .ai-fab-badge {
@@ -555,16 +555,16 @@ a, button {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--color-special), #a9832f);
+  background: linear-gradient(135deg, var(--color-clickable), #0f3c69);
   color: #ffffff;
-  box-shadow: 0 8px 24px rgba(201, 168, 76, 0.45);
+  box-shadow: 0 8px 24px rgba(26, 92, 158, 0.45);
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .ai-fab:hover:not(:disabled) {
   transform: scale(1.06);
-  box-shadow: 0 10px 30px rgba(201, 168, 76, 0.55);
+  box-shadow: 0 10px 30px rgba(26, 92, 158, 0.55);
 }
 
 .ai-fab:disabled {
@@ -589,6 +589,96 @@ a, button {
   align-items: center;
   justify-content: center;
   border: 2px solid var(--color-surface);
+}
+
+/* Custom hover card replacing a plain native title tooltip - a small
+   styled panel that lists the AI preferences not already shown on the
+   button/badge (persona, detail level, custom instructions). */
+.ai-fab-tooltip {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 14px);
+  width: 240px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(10, 22, 40, 0.22);
+  padding: 12px 14px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(6px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+  pointer-events: none;
+}
+
+.ai-fab-tooltip::after {
+  content: "";
+  position: absolute;
+  right: 24px;
+  top: 100%;
+  width: 10px;
+  height: 10px;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.ai-fab-wrap:hover .ai-fab-tooltip,
+.ai-fab-wrap:focus-within .ai-fab-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.ai-fab-tooltip-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--color-clickable);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ai-fab-tooltip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.ai-fab-tooltip-row dt {
+  font-family: var(--font-title);
+  font-weight: 600;
+  font-size: 10px;
+  color: var(--color-muted-text);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 0;
+}
+
+.ai-fab-tooltip-row dd {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--color-text);
+  margin: 1px 0 0;
+}
+
+.ai-fab-tooltip-hint {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  color: var(--color-muted-text);
+  font-style: italic;
 }
 
 .btn {
