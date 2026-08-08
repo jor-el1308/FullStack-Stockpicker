@@ -19,7 +19,7 @@ Two routers: (1) the **subscription/paywall** API — subscribing via Stripe Che
 
 CSV/PDF export endpoints stream a file (`Content-Disposition: attachment`) rather than the JSON envelope.
 
-- **Money:** amounts are integer **cents** (`amount_cents`); the subscription fee is `999` (S$9.99). Currency codes are ISO ("SGD"/"USD").
+- **Money:** amounts are integer **cents** (`amount_cents`); the subscription fee is `999` cents (S$9.99), exposed by `GET /status` as a `subscriptionFee` object `{ amountCents, currency, interval }`. Currency codes are ISO ("SGD"/"USD").
 
 ---
 
@@ -32,10 +32,12 @@ Current subscription state for the logged-in user, used by `/activate` and `/set
 ```json
 {
   "isActive": true,
+  "activatedAt": "2026-08-07T09:00:00.000Z",
   "subscriptionStatus": "active",
   "currentPeriodEnd": "2026-09-07T00:00:00.000Z",
   "cancelAtPeriodEnd": false,
-  "subscriptionFee": 999
+  "hasBillingAccount": true,
+  "subscriptionFee": { "amountCents": 999, "currency": "SGD", "interval": "month" }
 }
 ```
 - **Errors:** `404` if the user record is gone.
@@ -44,14 +46,14 @@ Current subscription state for the logged-in user, used by `/activate` and `/set
 Creates a Stripe Checkout Session (mode `subscription`, S$9.99/month) and returns its hosted URL.
 - **Auth:** required
 - **Request body:** none.
-- **Response `data`:** `{ "url": "https://checkout.stripe.com/c/pay/..." , "sessionId": "cs_test_..." }` — status `201`.
-- **Errors:** `409` if already active; `500` if `STRIPE_SECRET_KEY` is not configured.
+- **Response `data`:** `{ "url": "https://checkout.stripe.com/c/pay/..." }` — status `201`.
+- **Errors:** `409` if already active; `404` if the user record is gone; `500` if `STRIPE_SECRET_KEY` is not configured.
 
 ## 3. `GET /api/subscription/verify-session?session_id=cs_test_...`
 Confirms a returning Checkout session and activates the account if it was paid (idempotent with the webhook).
 - **Auth:** required
 - **Query:** `session_id` (required).
-- **Response `data`:** the same shape as `GET /status`, reflecting the now-active account.
+- **Response `data`:** the raw subscription status (`isActive`, `activatedAt`, `subscriptionStatus`, `currentPeriodEnd`, `cancelAtPeriodEnd`, `hasBillingAccount`) reflecting the now-active account, **plus** a `paymentStatus` field (`"paid"` once the first invoice is recorded; Stripe's raw `payment_status` if the session wasn't complete). Note this response does **not** include the `subscriptionFee` object that `GET /status` adds.
 - **Errors:** `400` if `session_id` is missing.
 
 ## 4. `POST /api/subscription/billing-portal`
@@ -79,7 +81,7 @@ The caller's own payment history, latest first.
 ```json
 [
   { "id": "…", "amountCents": 999, "currency": "SGD", "status": "succeeded",
-    "paymentMethod": "card", "paidAt": "2026-08-07T09:00:00.000Z" }
+    "paymentMethod": "stripe_subscription", "paidAt": "2026-08-07T09:00:00.000Z" }
 ]
 ```
 
@@ -96,11 +98,11 @@ All endpoints require `requireAuth` + `requireAdmin`. A non-admin gets `403`.
 
 ## 9. `GET /api/admin/stats`
 Summary tiles for the dashboard.
-- **Response `data`:** `{ "totalUsers": n, "activeUsers": n, "inactiveUsers": n, "admins": n, "totalRevenueCents": n, "paymentsCount": n }` (revenue sums the `payment` table, including anonymized rows from deleted accounts).
+- **Response `data`:** `{ "totalUsers": n, "activeUsers": n, "inactiveUsers": n, "totalRevenueCents": n }` (revenue sums `succeeded` rows in the `payment` table, including anonymized rows from deleted accounts).
 
 ## 10. `GET /api/admin/users`
 Every account with status flags.
-- **Response `data`:** `[{ id, email, name, isActive, isAdmin, subscriptionStatus, currentPeriodEnd, createdAt }, …]`
+- **Response `data`:** `[{ id, email, name, avatar, isActive, activatedAt, isAdmin, createdAt, paymentCount }, …]` (most-recently-created first; `paymentCount` is a per-user count from a `LEFT JOIN` on `payment`).
 
 ## 11. `POST /api/admin/users`
 Provisions an account directly (bypasses self-signup/paywall).
@@ -109,10 +111,10 @@ Provisions an account directly (bypasses self-signup/paywall).
 - **Errors:** `400` on validation failure; `409` if the email already exists.
 
 ## 12. `POST /api/admin/users/:id/revoke`  ·  `POST /api/admin/users/:id/restore`
-Set `is_active = 0` / `1` respectively. Response: the updated user.
+Set `is_active = 0` / `1` respectively. Response: the updated user. `revoke` also cancels the user's live Stripe subscription first; if that Stripe call fails the returned user carries an extra `stripeCancelError` string so the admin UI can surface it (the revoke still takes effect). A `400` guards against revoking your own access; `404` if the user doesn't exist.
 
 ## 13. `DELETE /api/admin/users/:id`
-Hard-deletes an account (irreversible): cancels any live Stripe subscription, removes the user's own data, but **keeps `payment` rows anonymized** (`ON DELETE SET NULL`). Response: `{ "deleted": true }`.
+Hard-deletes an account (irreversible): cancels any live Stripe subscription, removes the user's own data, but **keeps `payment` rows anonymized** (`ON DELETE SET NULL`). Response: `{ "deleted": true }` (with an extra `stripeCancelError` string if the Stripe cancellation failed; the row is deleted regardless). `400` if you target your own account; `404` if no such user.
 
 ## 14. `POST /api/admin/users/:id/admin`
 Promote/demote. **Request body:** `{ "isAdmin": true|false }`. Guards against removing the last remaining admin.
@@ -128,11 +130,11 @@ That user's payment rows (same row shape as endpoint 7).
 All three stream a file download (`Content-Disposition: attachment`), not the JSON envelope.
 
 ## 17. Data-pipeline control
-- `POST /api/admin/cache/clear` — invalidate the in-memory stock cache (`utils/cache.js`). Response `{ "cleared": true }`.
-- `POST /api/admin/reseed` — launch the ingestion pipeline (`ingestion/ingest.py`) server-side to pull fresh Yahoo Finance data. Response `{ "started": true }` (or reports an already-running run).
-- `GET /api/admin/reseed/status` — progress/output of the in-flight (or last) reseed: `{ "running": bool, "output": "…", "lastReseedAtMs": 1725700000000 }`.
-- `GET /api/admin/reseed/schedule` — `{ "intervalHours": 24|null, "nextRunAtMs": 1725786400000|null }`.
-- `POST /api/admin/reseed/schedule` — **body:** `{ "intervalHours": 24 }` (or `null` to disable auto-reseed).
+- `POST /api/admin/cache/clear` — invalidate the in-memory stock cache (`utils/cache.js`). Response `{ "entriesCleared": n }` (the number of cache entries that were dropped).
+- `POST /api/admin/reseed` — launch the ingestion pipeline (`ingestion/ingest.py`) server-side to pull fresh Yahoo Finance data. Response `{ "started": true }`; `409` if a reseed is already running, `500` if the process couldn't be spawned.
+- `GET /api/admin/reseed/status` — progress/output of the in-flight (or last) reseed: `{ "running": bool, "startedAt": "…"|null, "finishedAt": "…"|null, "exitCode": n|null, "error": "…"|null, "output": ["…", …] }`. `output` is the **tail of stdout/stderr as an array of lines** (not a single string), and this endpoint does **not** include a last-reseed timestamp — that lives on `/reseed/schedule` below.
+- `GET /api/admin/reseed/schedule` — `{ "intervalHours": 24|null, "nextRunAt": "2026-08-08T09:00:00.000Z"|null, "lastReseedAt": "2026-08-07T09:00:00.000Z"|null }`. Times are returned as **ISO strings** (converted from the epoch-ms columns), not raw millisecond numbers.
+- `POST /api/admin/reseed/schedule` — **body:** `{ "intervalHours": 24 }` (or `null` to disable auto-reseed). Response: the updated schedule, same shape as the `GET` above. `400` if `intervalHours` isn't a positive number or `null`.
 
 ---
 
